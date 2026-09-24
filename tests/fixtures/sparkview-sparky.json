@@ -1,0 +1,573 @@
+{
+  "hostname": "sparky",
+  "exporter_version": "0.1.0",
+  "timestamp": 1790291734.5749602,
+  "uptime_seconds": 260941.57,
+  "info": {
+    "time": "07:15:34 PM",
+    "uptime": "3d 0h 29m",
+    "kernel": "6.17.0-1008-nvidia",
+    "driver": "615.71.09",
+    "cuda": "13.4",
+    "gpu_name": "NVIDIA GB10"
+  },
+  "gpus": [
+    {
+      "index": 0,
+      "name": "NVIDIA GB10",
+      "utilization_percent": 0,
+      "temperature_celsius": 45,
+      "power_watts": 5.828,
+      "is_uma": true,
+      "memory_total_bytes": 130596839424,
+      "memory_used_bytes": 6343073792,
+      "throttle": {
+        "available": true,
+        "status": "IDLE",
+        "clk_mhz": 1007.0,
+        "clk_max_mhz": 3003.0,
+        "clk_threshold_mhz": 1400.0,
+        "pstate": "P0",
+        "util_pct": 0,
+        "throttle_raw": 1024,
+        "throttle_reasons": [
+          "RELIABILITY"
+        ],
+        "problem_throttle": false,
+        "locked": false
+      },
+      "identity": {
+        "uuid": "GPU-00000000-0000-0000-0000-00000000000b",
+        "pci_bus_id": "0000000F:01:00.0",
+        "vbios": "9A.0B.25.00.00"
+      },
+      "clock_event_seconds": {
+        "sw_power_cap": 117.757942,
+        "sw_thermal_slowdown": 0.0,
+        "hw_thermal_slowdown": 0.0,
+        "hw_power_brake_slowdown": 0.0,
+        "sync_boost": 0.0
+      },
+      "clock_cap": null
+    }
+  ],
+  "memory": {
+    "total_bytes": 130596839424,
+    "used_bytes": 6343073792,
+    "available_bytes": 124253765632,
+    "percent": 4.9,
+    "swap_total_bytes": 0,
+    "swap_used_bytes": 0,
+    "swap_percent": 0.0
+  },
+  "pressure": {
+    "available": true,
+    "some_avg10": 0.0,
+    "full_avg10": 0.0,
+    "level": "LOW"
+  },
+  "cpu": {
+    "utilization_percent": 5.18,
+    "cores_total": 20,
+    "cores_active": 4,
+    "temperature_celsius": 51.4
+  },
+  "spbm": {
+    "hwmon": "/sys/class/hwmon/hwmon6",
+    "power_watts": {
+      "cpu_e": {
+        "input": 0.005
+      },
+      "cpu_gpu": {
+        "input": 17.623
+      },
+      "cpu_p": {
+        "input": 4.106
+      },
+      "dc_input": {
+        "input": 44.079
+      },
+      "dla": {
+        "input": 0.188
+      },
+      "gpu": {
+        "input": 12.827
+      },
+      "pl1": {
+        "input": 36.876,
+        "cap": 140.0,
+        "max": 250.0,
+        "min": 0.1
+      },
+      "pl2": {
+        "input": 29.495,
+        "cap": 142.0,
+        "max": 250.0,
+        "min": 0.1
+      },
+      "prereg": {
+        "input": 7.52
+      },
+      "soc_pkg": {
+        "input": 28.962
+      },
+      "sys_total": {
+        "input": 46.615
+      },
+      "syspl1": {
+        "input": 53.663,
+        "cap": 231.0,
+        "max": 300.0,
+        "min": 0.1
+      },
+      "syspl2": {
+        "input": 51.535,
+        "cap": 244.0,
+        "max": 300.0,
+        "min": 0.1
+      },
+      "vcore": {
+        "input": 4.243
+      }
+    },
+    "temperatures_celsius": {
+      "cpu_e_clu1": {
+        "input": 32.01
+      },
+      "dla": {
+        "input": 27.29
+      },
+      "tj_max": {
+        "input": 32.46
+      },
+      "cpu_p_clu1": {
+        "input": 32.03
+      },
+      "cpu_e_clu0": {
+        "input": 31.98
+      },
+      "gpu": {
+        "input": 32.12
+      },
+      "cpu_p_clu0": {
+        "input": 32.46
+      },
+      "soc": {
+        "input": 32.17
+      }
+    },
+    "energy_joules": {
+      "cpu_e": {
+        "input": 28734.878
+      },
+      "cpu_p": {
+        "input": 560214.946
+      },
+      "gpu": {
+        "input": 956064.182
+      },
+      "pkg": {
+        "input": 605213.16
+      }
+    },
+    "peak_gpu_watts": 12.827,
+    "cap_exceeded": {
+      "pl1": false,
+      "pl2": false,
+      "syspl1": false,
+      "syspl2": false
+    },
+    "tj_rise_celsius": 5.1,
+    "prochot": 1,
+    "pl_level": 1
+  },
+  "thermal_zones": [
+    {
+      "zone": "thermal_zone0",
+      "type": "acpitz",
+      "celsius": 51.4
+    },
+    {
+      "zone": "thermal_zone1",
+      "type": "acpitz",
+      "celsius": 46.6
+    },
+    {
+      "zone": "thermal_zone2",
+      "type": "acpitz",
+      "celsius": 51.4
+    },
+    {
+      "zone": "thermal_zone3",
+      "type": "acpitz",
+      "celsius": 46.9
+    },
+    {
+      "zone": "thermal_zone4",
+      "type": "acpitz",
+      "celsius": 47.1
+    },
+    {
+      "zone": "thermal_zone5",
+      "type": "acpitz",
+      "celsius": 48.0
+    },
+    {
+      "zone": "thermal_zone6",
+      "type": "acpitz",
+      "celsius": 48.5
+    }
+  ],
+  "hwmon_temperatures": [
+    {
+      "chip": "acpitz",
+      "sensor": "temp1",
+      "celsius": 51.4
+    },
+    {
+      "chip": "acpitz",
+      "sensor": "temp2",
+      "celsius": 46.6
+    },
+    {
+      "chip": "acpitz",
+      "sensor": "temp3",
+      "celsius": 51.4
+    },
+    {
+      "chip": "acpitz",
+      "sensor": "temp4",
+      "celsius": 46.9
+    },
+    {
+      "chip": "acpitz",
+      "sensor": "temp5",
+      "celsius": 47.1
+    },
+    {
+      "chip": "acpitz",
+      "sensor": "temp6",
+      "celsius": 48.0
+    },
+    {
+      "chip": "acpitz",
+      "sensor": "temp7",
+      "celsius": 48.5
+    },
+    {
+      "chip": "nvme",
+      "sensor": "Composite",
+      "celsius": 41.85
+    },
+    {
+      "chip": "nvme",
+      "sensor": "Sensor 1",
+      "celsius": 41.85
+    },
+    {
+      "chip": "mlx5",
+      "sensor": "asic",
+      "celsius": 48.0
+    },
+    {
+      "chip": "mlx5",
+      "sensor": "asic",
+      "celsius": 48.0
+    },
+    {
+      "chip": "mlx5",
+      "sensor": "asic",
+      "celsius": 48.0
+    },
+    {
+      "chip": "mlx5",
+      "sensor": "asic",
+      "celsius": 48.0
+    },
+    {
+      "chip": "spbm",
+      "sensor": "tj_max",
+      "celsius": 32.46
+    },
+    {
+      "chip": "spbm",
+      "sensor": "cpu_e_clu0",
+      "celsius": 31.98
+    },
+    {
+      "chip": "spbm",
+      "sensor": "cpu_p_clu0",
+      "celsius": 32.46
+    },
+    {
+      "chip": "spbm",
+      "sensor": "cpu_e_clu1",
+      "celsius": 32.01
+    },
+    {
+      "chip": "spbm",
+      "sensor": "cpu_p_clu1",
+      "celsius": 32.03
+    },
+    {
+      "chip": "spbm",
+      "sensor": "gpu",
+      "celsius": 32.12
+    },
+    {
+      "chip": "spbm",
+      "sensor": "soc",
+      "celsius": 32.18
+    },
+    {
+      "chip": "spbm",
+      "sensor": "dla",
+      "celsius": 27.29
+    },
+    {
+      "chip": "mt7925_phy0",
+      "sensor": "temp1",
+      "celsius": 43.0
+    }
+  ],
+  "network": [
+    {
+      "iface": "enP2p1s0f0np0",
+      "state": "DOWN",
+      "speed_gbps": null,
+      "rx_bytes": 0,
+      "tx_bytes": 0,
+      "rx_packets": 0,
+      "tx_packets": 0,
+      "rx_errors": 0,
+      "tx_errors": 0,
+      "rx_dropped": 0,
+      "cx7": true
+    },
+    {
+      "iface": "enP2p1s0f1np1",
+      "state": "DOWN",
+      "speed_gbps": null,
+      "rx_bytes": 0,
+      "tx_bytes": 0,
+      "rx_packets": 0,
+      "tx_packets": 0,
+      "rx_errors": 0,
+      "tx_errors": 0,
+      "rx_dropped": 0,
+      "cx7": true
+    },
+    {
+      "iface": "enP7s7",
+      "state": "UP",
+      "speed_gbps": 10.0,
+      "rx_bytes": 243159531824,
+      "tx_bytes": 202596309604,
+      "rx_packets": 169483212,
+      "tx_packets": 140767498,
+      "rx_errors": 0,
+      "tx_errors": 0,
+      "rx_dropped": 0,
+      "cx7": false
+    },
+    {
+      "iface": "enp1s0f0np0",
+      "state": "DOWN",
+      "speed_gbps": null,
+      "rx_bytes": 0,
+      "tx_bytes": 0,
+      "rx_packets": 0,
+      "tx_packets": 0,
+      "rx_errors": 0,
+      "tx_errors": 0,
+      "rx_dropped": 0,
+      "cx7": true
+    },
+    {
+      "iface": "enp1s0f1np1",
+      "state": "UP",
+      "speed_gbps": 25.0,
+      "rx_bytes": 975197,
+      "tx_bytes": 6186,
+      "rx_packets": 11594,
+      "tx_packets": 87,
+      "rx_errors": 0,
+      "tx_errors": 0,
+      "rx_dropped": 0,
+      "cx7": true
+    },
+    {
+      "iface": "wlP9s9",
+      "state": "DOWN",
+      "speed_gbps": null,
+      "rx_bytes": 0,
+      "tx_bytes": 0,
+      "rx_packets": 0,
+      "tx_packets": 0,
+      "rx_errors": 0,
+      "tx_errors": 0,
+      "rx_dropped": 0,
+      "cx7": false
+    }
+  ],
+  "rdma": [
+    {
+      "device": "roceP2p1s0f0",
+      "port": 1,
+      "netdev": "enP2p1s0f0np0",
+      "state": "DOWN",
+      "phys_state": "Disabled",
+      "rate_gbps": 40.0,
+      "link_layer": "Ethernet",
+      "tx_bytes": 0,
+      "rx_bytes": 0,
+      "tx_packets": 0,
+      "rx_packets": 0,
+      "errors": {
+        "symbol_error": 0,
+        "link_downed": 0,
+        "link_error_recovery": 0,
+        "port_rcv_errors": 0,
+        "port_xmit_discards": 0,
+        "port_xmit_wait": 0
+      },
+      "hw_counters": {
+        "out_of_sequence": 0,
+        "packet_seq_err": 0,
+        "duplicate_request": 0,
+        "implied_nak_seq_err": 0,
+        "local_ack_timeout_err": 0,
+        "req_transport_retries_exceeded": 0,
+        "rnr_nak_retry_err": 0,
+        "roce_adp_retrans": 0,
+        "roce_adp_retrans_to": 0,
+        "roce_slow_restart": 0,
+        "out_of_buffer": 0,
+        "np_ecn_marked_roce_packets": 0,
+        "np_cnp_sent": 0,
+        "rp_cnp_handled": 0
+      }
+    },
+    {
+      "device": "roceP2p1s0f1",
+      "port": 1,
+      "netdev": "enP2p1s0f1np1",
+      "state": "DOWN",
+      "phys_state": "Disabled",
+      "rate_gbps": 25.0,
+      "link_layer": "Ethernet",
+      "tx_bytes": 0,
+      "rx_bytes": 0,
+      "tx_packets": 0,
+      "rx_packets": 0,
+      "errors": {
+        "symbol_error": 0,
+        "link_downed": 0,
+        "link_error_recovery": 0,
+        "port_rcv_errors": 0,
+        "port_xmit_discards": 0,
+        "port_xmit_wait": 0
+      },
+      "hw_counters": {
+        "out_of_sequence": 0,
+        "packet_seq_err": 0,
+        "duplicate_request": 0,
+        "implied_nak_seq_err": 0,
+        "local_ack_timeout_err": 0,
+        "req_transport_retries_exceeded": 0,
+        "rnr_nak_retry_err": 0,
+        "roce_adp_retrans": 0,
+        "roce_adp_retrans_to": 0,
+        "roce_slow_restart": 0,
+        "out_of_buffer": 0,
+        "np_ecn_marked_roce_packets": 0,
+        "np_cnp_sent": 0,
+        "rp_cnp_handled": 0
+      }
+    },
+    {
+      "device": "rocep1s0f0",
+      "port": 1,
+      "netdev": "enp1s0f0np0",
+      "state": "DOWN",
+      "phys_state": "Disabled",
+      "rate_gbps": 40.0,
+      "link_layer": "Ethernet",
+      "tx_bytes": 0,
+      "rx_bytes": 0,
+      "tx_packets": 0,
+      "rx_packets": 0,
+      "errors": {
+        "symbol_error": 0,
+        "link_downed": 0,
+        "link_error_recovery": 0,
+        "port_rcv_errors": 0,
+        "port_xmit_discards": 0,
+        "port_xmit_wait": 0
+      },
+      "hw_counters": {
+        "out_of_sequence": 0,
+        "packet_seq_err": 0,
+        "duplicate_request": 0,
+        "implied_nak_seq_err": 0,
+        "local_ack_timeout_err": 0,
+        "req_transport_retries_exceeded": 0,
+        "rnr_nak_retry_err": 0,
+        "roce_adp_retrans": 0,
+        "roce_adp_retrans_to": 0,
+        "roce_slow_restart": 0,
+        "out_of_buffer": 0,
+        "np_ecn_marked_roce_packets": 0,
+        "np_cnp_sent": 0,
+        "rp_cnp_handled": 0
+      }
+    },
+    {
+      "device": "rocep1s0f1",
+      "port": 1,
+      "netdev": "enp1s0f1np1",
+      "state": "ACTIVE",
+      "phys_state": "LinkUp",
+      "rate_gbps": 25.0,
+      "link_layer": "Ethernet",
+      "tx_bytes": 0,
+      "rx_bytes": 100227712,
+      "tx_packets": 0,
+      "rx_packets": 24128,
+      "errors": {
+        "symbol_error": 0,
+        "link_downed": 0,
+        "link_error_recovery": 0,
+        "port_rcv_errors": 0,
+        "port_xmit_discards": 0,
+        "port_xmit_wait": 0
+      },
+      "hw_counters": {
+        "out_of_sequence": 0,
+        "packet_seq_err": 0,
+        "duplicate_request": 0,
+        "implied_nak_seq_err": 0,
+        "local_ack_timeout_err": 0,
+        "req_transport_retries_exceeded": 0,
+        "rnr_nak_retry_err": 0,
+        "roce_adp_retrans": 0,
+        "roce_adp_retrans_to": 0,
+        "roce_slow_restart": 0,
+        "out_of_buffer": 0,
+        "np_ecn_marked_roce_packets": 0,
+        "np_cnp_sent": 0,
+        "rp_cnp_handled": 0
+      }
+    }
+  ],
+  "processes": [
+    {
+      "pid": 516547,
+      "user": "claude",
+      "cmd": "egb_ri4",
+      "gpu_mem": 11685888,
+      "cpu_pct": 0.0
+    }
+  ],
+  "scrape_duration_seconds": 0.4131
+}

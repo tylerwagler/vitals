@@ -1,0 +1,25 @@
+[Unit]
+Description=sparkview-exporter: GPU and host state as JSON for pulsar-gui (:9420)
+After=network-online.target nvidia-persistenced.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/sparkview-exporter/sparkview_exporter.py --port 9420
+Restart=on-failure
+RestartSec=2
+
+# Everything it reads is world-readable (/sys, /proc, /dev/nvidia*), so it
+# needs no account of its own and no write access anywhere.
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+Nice=10
+
+[Install]
+WantedBy=multi-user.target
