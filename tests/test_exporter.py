@@ -173,3 +173,27 @@ def test_spbm_status_falls_back_to_the_acpi_device(tmp_path):
     assert out["cap_exceeded"] == {"pl1": False}
     assert out["prochot"] == 1 and out["pl_level"] is None
     assert out["tj_rise_celsius"] == 3.6
+
+
+def test_rdma_prefers_netlink_counters_over_sysfs(tmp_path):
+    port = tmp_path / "rocex" / "ports" / "1"
+    (port / "hw_counters").mkdir(parents=True)
+    (port / "hw_counters" / "out_of_sequence").write_text("3\n")
+    netlink = {("rocex", 1): {"out_of_sequence": 9, "rx_write_requests": 5, "port": 1}}
+
+    [row] = sx.rdma(str(tmp_path), hw_counters=netlink)
+    assert row["hw_counters"] == {"out_of_sequence": 9}  # only the counters the GUI reads
+
+    [row] = sx.rdma(str(tmp_path), hw_counters={})  # netlink knew nothing of this port
+    assert row["hw_counters"] == {"out_of_sequence": 3}
+
+
+def test_cpu_temperature_is_the_hottest_cpu_sensor():
+    temps = [
+        {"chip": "mlx5", "sensor": "temp1", "celsius": 70.0},
+        {"chip": "acpitz", "sensor": "temp1", "celsius": 35.8},
+        {"chip": "acpitz", "sensor": "temp2", "celsius": 41.2},
+        {"chip": "acpitz", "sensor": "temp3", "celsius": None},
+    ]
+    assert sx.cpu(temps)["temperature_celsius"] == 41.2
+    assert sx.cpu([])["temperature_celsius"] is None

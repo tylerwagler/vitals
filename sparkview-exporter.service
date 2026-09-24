@@ -10,15 +10,18 @@ Restart=on-failure
 RestartSec=2
 
 # Everything it reads is world-readable (/sys, /proc, /dev/nvidia*), so it
-# needs no account of its own and no write access anywhere.
-DynamicUser=yes
+# needs only a bare system account and no write access anywhere. Not DynamicUser:
+# combined with the settings below it cuts systemctl off from systemd, and the
+# clock-cap check then reads every unit as inactive.
+User=sparkview-exporter
+Group=sparkview-exporter
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 ProtectKernelTunables=yes
 ProtectControlGroups=yes
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 Nice=10
 
 [Install]

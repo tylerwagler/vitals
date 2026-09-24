@@ -413,18 +413,22 @@ def memory(vm: Any) -> dict[str, Any]:
     }
 
 
-def cpu() -> dict[str, Any]:
+CPU_TEMP_CHIPS = ("coretemp", "k10temp", "cpu_thermal", "acpitz")
+
+
+def cpu(hwmon_temps: list[dict[str, Any]]) -> dict[str, Any]:
     # Non-blocking: utilization since the previous call (the previous scrape).
     per_core = psutil.cpu_percent(None, percpu=True)
+    # The hottest sensor of the first CPU chip present, as sparkview does, but
+    # from the hwmon readings already taken: psutil.sensors_temperatures()
+    # re-reads every chip, and the NIC and Wi-Fi ones answer slowly.
     temp = None
-    try:
-        temps = psutil.sensors_temperatures()
-        for key in ("coretemp", "k10temp", "cpu_thermal", "acpitz"):
-            if temps.get(key):
-                temp = max(t.current for t in temps[key])
-                break
-    except (AttributeError, OSError):
-        pass
+    for chip in CPU_TEMP_CHIPS:
+        readings = [t["celsius"] for t in hwmon_temps
+                    if t["chip"] == chip and t["celsius"] is not None]
+        if readings:
+            temp = max(readings)
+            break
     return {
         "utilization_percent": sum(per_core) / len(per_core) if per_core else None,
         "cores_total": psutil.cpu_count(),
@@ -550,7 +554,30 @@ def _after_colon(text: str | None) -> str | None:
     return None if text is None else text.split(":", 1)[-1].strip()
 
 
-def rdma(root: str = "/sys/class/infiniband") -> list[dict[str, Any]]:
+def rdma_netlink_counters() -> dict[tuple[str, int], dict[str, int]] | None:
+    """Every port's hw counters from one ``rdma statistic`` netlink query.
+
+    Each read of a sysfs hw_counters file is its own firmware query, 2-3 ms
+    apiece, which made the RDMA section most of a scrape. None when the tool
+    is missing or fails, and the sysfs files are read instead.
+    """
+    try:
+        result = subprocess.run(["rdma", "-j", "statistic", "show"],
+                                capture_output=True, text=True, timeout=3)
+        rows = json.loads(result.stdout) if result.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
+    if not isinstance(rows, list):
+        return None
+    return {
+        (row["ifname"], row["port"]): {k: v for k, v in row.items() if isinstance(v, int)}
+        for row in rows
+        if isinstance(row, dict) and "ifname" in row and isinstance(row.get("port"), int)
+    }
+
+
+def rdma(root: str = "/sys/class/infiniband",
+         hw_counters: dict[tuple[str, int], dict[str, int]] | None = None) -> list[dict[str, Any]]:
     out = []
     for dev in sorted(glob.glob(os.path.join(root, "*"))):
         nets = sorted(os.listdir(f"{dev}/device/net")) if os.path.isdir(f"{dev}/device/net") else []
@@ -582,10 +609,15 @@ def rdma(root: str = "/sys/class/infiniband") -> list[dict[str, Any]]:
                 "rx_packets": read_int(f"{counters}/port_rcv_packets"),
                 "errors": {k: v for k in RDMA_ERRORS
                            if (v := read_int(f"{counters}/{k}")) is not None},
-                "hw_counters": {k: v for k in RDMA_HW_COUNTERS
-                                if (v := read_int(f"{hw}/{k}")) is not None},
+                "hw_counters": _hw_counters(hw, (hw_counters or {}).get((os.path.basename(dev), port_no))),
             })
     return out
+
+
+def _hw_counters(sysfs_dir: str, netlink: dict[str, int] | None) -> dict[str, int]:
+    if netlink is not None:
+        return {k: netlink[k] for k in RDMA_HW_COUNTERS if k in netlink}
+    return {k: v for k in RDMA_HW_COUNTERS if (v := read_int(f"{sysfs_dir}/{k}")) is not None}
 
 
 def uptime_seconds() -> float | None:
@@ -621,6 +653,7 @@ class Exporter:
         vm = psutil.virtual_memory()
         gpus, processes = self.gpus.collect(vm, self.clock_cap.get())
         up = uptime_seconds()
+        hwmon_temps = hwmon_temperatures()
         return {
             "hostname": platform.node(),
             "exporter_version": __version__,
@@ -636,12 +669,12 @@ class Exporter:
             "gpus": gpus,
             "memory": memory(vm),
             "pressure": pressure(),
-            "cpu": cpu(),
+            "cpu": cpu(hwmon_temps),
             "spbm": self.spbm.collect(),
             "thermal_zones": thermal_zones(),
-            "hwmon_temperatures": hwmon_temperatures(),
+            "hwmon_temperatures": hwmon_temps,
             "network": network(),
-            "rdma": rdma(),
+            "rdma": rdma(hw_counters=rdma_netlink_counters()),
             "processes": processes,
             "scrape_duration_seconds": round(time.perf_counter() - started, 4),
         }

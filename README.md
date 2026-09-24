@@ -39,13 +39,15 @@ scrape. A reading that cannot be taken is `null` or absent, never `0`.
 ## Install as a service
 
 ```sh
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin sparkview-exporter
 sudo install -D -m 0644 sparkview_exporter.py /opt/sparkview-exporter/sparkview_exporter.py
 sudo install -m 0644 sparkview-exporter.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now sparkview-exporter
 ```
 
-It runs as a transient `DynamicUser` with a read-only filesystem: everything it
-reads is world-readable.
+It runs as that bare system account with a read-only filesystem: everything it reads is
+world-readable. It needs `AF_NETLINK` for `rdma statistic`, which reads every
+port's hw counters in one query instead of one firmware query per sysfs file.
 
 ## Tests
 
