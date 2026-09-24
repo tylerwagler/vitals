@@ -1,0 +1,29 @@
+# Runs the exporter inside Proxmox container %i, supervised from the host.
+#
+# For app (OCI) containers whose PID 1 is the workload, so nothing inside can
+# keep the exporter running. It runs in the container's namespaces, so it
+# answers on the container's own address and reports the container's
+# hostname, memory and processes, as nobody.
+#
+# Inside the container: /opt/sparkview-exporter/{sparkview_exporter.py,
+# pynvml.py} and psutil. Then on the host:
+#   systemctl enable --now sparkview-exporter-pct@130
+
+[Unit]
+Description=sparkview-exporter in container %i (:9420)
+After=pve-guests.service
+Wants=pve-guests.service
+
+[Service]
+Type=simple
+# A process left behind in the container would hold the port: pct exec does
+# not carry our stop into the container, so clear it both before and after.
+ExecStartPre=-/usr/sbin/pct exec %i -- pkill -f /opt/sparkview-exporter/sparkview_exporter.py
+ExecStart=/usr/sbin/pct exec %i -- setpriv --reuid=nobody --regid=nogroup --clear-groups --no-new-privs /usr/bin/python3 /opt/sparkview-exporter/sparkview_exporter.py --port 9420
+ExecStopPost=-/usr/sbin/pct exec %i -- pkill -f /opt/sparkview-exporter/sparkview_exporter.py
+# The container may be stopped or restarting; keep trying.
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

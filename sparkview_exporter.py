@@ -96,7 +96,6 @@ RDMA_HW_COUNTERS = (
 
 SPBM_ACPI_DIR = "/sys/bus/platform/devices/NVDA8800:00"
 SYSTEMD_DIRS = ("/etc/systemd/system", "/lib/systemd/system", "/usr/lib/systemd/system")
-UMA_THRESHOLD = 0.9
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +153,18 @@ def clock_status(clk: float, clk_max: float, util: float, pstate: str, problem: 
     if clk < CLOCK_THRESHOLD_MHZ or problem:
         return "THROTTLED", locked
     return "PASS", locked
+
+
+def gpu_memory(mem: Any, vm: Any) -> tuple[bool, int, int]:
+    """(is_uma, total, used) for one GPU.
+
+    GB10's memory is the host's, and NVML says so by not reporting it. That,
+    not a total that happens to be near the host's, is the test: sparkview's
+    size comparison calls a 16 GB card in a 16 GB container unified.
+    """
+    if mem is None:
+        return True, vm.total, vm.total - vm.available
+    return False, mem.total, mem.used
 
 
 def parse_lgc(exec_start: str) -> float | None:
@@ -267,12 +278,7 @@ class Gpus:
         util_pct = util.gpu if util is not None else None
         power_mw = call(pynvml.nvmlDeviceGetPowerUsage, h)
 
-        # GB10's memory is the host's: NVML reports it as not supported, and
-        # when it does report, a total near the host's means the same thing.
-        mem = call(pynvml.nvmlDeviceGetMemoryInfo, h)
-        uma = mem is None or vm.total * UMA_THRESHOLD <= mem.total <= vm.total * 1.1
-        mem_total = vm.total if uma else mem.total
-        mem_used = vm.total - vm.available if uma else mem.used
+        uma, mem_total, mem_used = gpu_memory(call(pynvml.nvmlDeviceGetMemoryInfo, h), vm)
 
         gpu: dict[str, Any] = {
             "index": index,

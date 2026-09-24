@@ -49,6 +49,28 @@ It runs as that bare system account with a read-only filesystem: everything it r
 world-readable. It needs `AF_NETLINK` for `rdma statistic`, which reads every
 port's hw counters in one query instead of one firmware query per sysfs file.
 
+### In a Proxmox app container
+
+An OCI app container runs its workload as PID 1, so nothing inside it can keep
+the exporter running. `contrib/sparkview-exporter-pct@.service` supervises it
+from the host instead, with `pct exec`, so it still runs in the container's
+namespaces: it answers on the container's address and reports its hostname,
+memory and GPU processes. The container needs `python3-psutil` and the two
+files; `pynvml.py` is a single pure-Python file and can be copied from any
+`nvidia-ml-py` install.
+
+```sh
+# in the container
+apt-get install -y --no-install-recommends python3-psutil
+mkdir -p /opt/sparkview-exporter   # + sparkview_exporter.py, pynvml.py
+# on the host
+install -m 0644 contrib/sparkview-exporter-pct@.service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now sparkview-exporter-pct@130
+```
+
+On a discrete card only the GPU and the container's own view are specific to
+it; hwmon, thermal zones and RDMA ports are the host's, as `/sys` is.
+
 ## Tests
 
 ```sh

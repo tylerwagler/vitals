@@ -197,3 +197,13 @@ def test_cpu_temperature_is_the_hottest_cpu_sensor():
     ]
     assert sx.cpu(temps)["temperature_celsius"] == 41.2
     assert sx.cpu([])["temperature_celsius"] is None
+
+
+def test_uma_means_nvml_cannot_report_the_memory():
+    from types import SimpleNamespace as NS
+    vm = NS(total=16 * 2**30, available=6 * 2**30)
+    # A 16 GB card in a 16 GB container is not unified memory.
+    card = NS(total=16 * 2**30, used=13 * 2**30)
+    assert sx.gpu_memory(card, vm) == (False, 16 * 2**30, 13 * 2**30)
+    # GB10: NVML reports no device memory; the host's is the GPU's.
+    assert sx.gpu_memory(None, vm) == (True, 16 * 2**30, 10 * 2**30)
