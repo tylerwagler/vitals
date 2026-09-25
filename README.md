@@ -51,9 +51,22 @@ port's hw counters in one query instead of one firmware query per sysfs file.
 
 ### In a Proxmox app container
 
-An OCI app container runs its workload as PID 1, so nothing inside it can keep
-the exporter running. `contrib/sparkview-exporter-pct@.service` supervises it
-from the host instead, with `pct exec`, so it still runs in the container's
+An OCI app container runs its workload as PID 1, so nothing inside it keeps
+the exporter running. `contrib/entrypoint.sh` fixes that without touching the
+host: set it as the container's entrypoint and it starts the exporter (as
+nobody, restarted if it exits) and then `exec`s the workload, which stays PID 1.
+Its arguments are the workload; with none it runs `/app/llama-server`.
+
+```sh
+# in the container: python3-psutil, and in /opt/sparkview-exporter
+# sparkview_exporter.py, pynvml.py and entrypoint.sh (0755)
+# on the host, then restart the container
+pct set 130 --entrypoint /opt/sparkview-exporter/entrypoint.sh
+```
+
+If the container's entrypoint must stay as it is,
+`contrib/sparkview-exporter-pct@.service` supervises the exporter from the host
+instead, with `pct exec`, so it still runs in the container's
 namespaces: it answers on the container's address and reports its hostname,
 memory and GPU processes. The container needs `python3-psutil` and the two
 files; `pynvml.py` is a single pure-Python file and can be copied from any
