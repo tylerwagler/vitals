@@ -1,7 +1,7 @@
 [project]
 name = "vitals"
-version = "0.1.0"
-description = "One host's GPU and hardware state as JSON, for pulsar-gui's cluster view"
+dynamic = ["version"]
+description = "One host's hardware, OS and live state as JSON over HTTP, with a Server-Sent Events stream"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -14,15 +14,18 @@ dependencies = [
 dev = ["pytest>=8.0"]
 
 [project.scripts]
-vitals = "vitals:main"
+vitals = "vitals.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-py-modules = ["vitals"]
+[tool.setuptools.dynamic]
+version = { attr = "vitals.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = ["src"]

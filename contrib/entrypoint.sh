@@ -12,7 +12,7 @@
 # exporter's parent, so a dead exporter is reaped here rather than left for
 # a PID 1 that never expected children.
 
-EXPORTER=/opt/vitals/vitals.py
+EXPORTER=/opt/vitals/vitals.pyz
 
 (
     while :; do
