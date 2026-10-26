@@ -1,4 +1,4 @@
-"""sparkview-exporter: one host's GPU and hardware state as JSON, for pulsar-gui.
+"""vitals: one host's GPU and hardware state as JSON, for pulsar-gui.
 
 Serves ``GET /metrics.json`` on :9420, in the shape pulsar-gui's cluster view
 reads (its ``tests/fixtures/sparkview-*.json`` are the reference). Every
@@ -48,7 +48,7 @@ except ImportError:  # the exporter still reports the host without a GPU stack
 
 __version__ = "0.1.0"
 
-logger = logging.getLogger("sparkview-exporter")
+logger = logging.getLogger("vitals")
 
 # sparkview's thresholds: a clock under this while loaded is throttled, and
 # under this utilization the GPU is idle whatever its clock says.
@@ -700,7 +700,7 @@ class Exporter:
 
 def make_handler(exporter: Exporter) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
-        server_version = f"sparkview-exporter/{__version__}"
+        server_version = f"vitals/{__version__}"
 
         def do_GET(self) -> None:  # noqa: N802 - http.server's name
             path = self.path.split("?", 1)[0]
@@ -730,7 +730,7 @@ def make_handler(exporter: Exporter) -> type[BaseHTTPRequestHandler]:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="sparkview-exporter", description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(prog="vitals", description=__doc__.splitlines()[0])
     parser.add_argument("--host", default="0.0.0.0", help="listen address (default 0.0.0.0)")
     parser.add_argument("--port", type=int, default=9420, help="listen port (default 9420)")
     parser.add_argument("--once", action="store_true", help="print one snapshot and exit")
@@ -745,7 +745,7 @@ def main(argv: list[str] | None = None) -> None:
         print(json.dumps(exporter.snapshot(), indent=2))
         return
     server = ThreadingHTTPServer((args.host, args.port), make_handler(exporter))
-    logger.info("sparkview-exporter %s on http://%s:%d/metrics.json", __version__, args.host, args.port)
+    logger.info("vitals %s on http://%s:%d/metrics.json", __version__, args.host, args.port)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

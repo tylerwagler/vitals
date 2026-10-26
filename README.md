@@ -1,18 +1,23 @@
-# sparkview-exporter
+# vitals
 
 One host's GPU and hardware state as JSON, for the cluster view in
-[pulsar-gui](../../pulsar-gui). Run one on each host that holds a TP rank; the
+[pulsar-gui](../../pulsar/gui). Run one on each host that holds a TP rank; the
 GUI polls `http://{host}:9420/metrics.json` once a second.
 
 ```sh
-python3 sparkview_exporter.py            # serve on 0.0.0.0:9420
-python3 sparkview_exporter.py --once     # print one snapshot and exit
+python3 vitals.py          # serve on 0.0.0.0:9420
+python3 vitals.py --once   # print one snapshot and exit
 curl -s localhost:9420/metrics.json | jq .gpus[0].throttle
 ```
 
 It needs `nvidia-ml-py` (imported as `pynvml`) and `psutil`, and nothing else.
 DGX OS ships both system-wide, so on a Spark it runs with the system Python.
 Without NVML it still reports the host, with `gpus: []`.
+
+It was called `sparkview-exporter` until 2026-10-26, after the
+[sparkview](https://github.com/parallelArchitect/sparkview) code it started
+from. The port and the JSON are unchanged, so a host still running the old
+copy keeps working; see [Moving a host from sparkview-exporter](#moving-a-host-from-sparkview-exporter).
 
 ## What it reports
 
@@ -39,10 +44,10 @@ scrape. A reading that cannot be taken is `null` or absent, never `0`.
 ## Install as a service
 
 ```sh
-sudo useradd --system --no-create-home --shell /usr/sbin/nologin sparkview-exporter
-sudo install -D -m 0644 sparkview_exporter.py /opt/sparkview-exporter/sparkview_exporter.py
-sudo install -m 0644 sparkview-exporter.service /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl enable --now sparkview-exporter
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin vitals
+sudo install -D -m 0644 vitals.py /opt/vitals/vitals.py
+sudo install -m 0644 vitals.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now vitals
 ```
 
 It runs as that bare system account with a read-only filesystem: everything it reads is
@@ -58,14 +63,14 @@ nobody, restarted if it exits) and then `exec`s the workload, which stays PID 1.
 Its arguments are the workload; with none it runs `/app/llama-server`.
 
 ```sh
-# in the container: python3-psutil, and in /opt/sparkview-exporter
-# sparkview_exporter.py, pynvml.py and entrypoint.sh (0755)
+# in the container: python3-psutil, and in /opt/vitals
+# vitals.py, pynvml.py and entrypoint.sh (0755)
 # on the host, then restart the container
-pct set 130 --entrypoint /opt/sparkview-exporter/entrypoint.sh
+pct set 130 --entrypoint /opt/vitals/entrypoint.sh
 ```
 
 If the container's entrypoint must stay as it is,
-`contrib/sparkview-exporter-pct@.service` supervises the exporter from the host
+`contrib/vitals-pct@.service` supervises the exporter from the host
 instead, with `pct exec`, so it still runs in the container's
 namespaces: it answers on the container's address and reports its hostname,
 memory and GPU processes. The container needs `python3-psutil` and the two
@@ -75,21 +80,38 @@ files; `pynvml.py` is a single pure-Python file and can be copied from any
 ```sh
 # in the container
 apt-get install -y --no-install-recommends python3-psutil
-mkdir -p /opt/sparkview-exporter   # + sparkview_exporter.py, pynvml.py
+mkdir -p /opt/vitals   # + vitals.py, pynvml.py
 # on the host
-install -m 0644 contrib/sparkview-exporter-pct@.service /etc/systemd/system/
-systemctl daemon-reload && systemctl enable --now sparkview-exporter-pct@130
+install -m 0644 contrib/vitals-pct@.service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now vitals-pct@130
 ```
 
 On a discrete card only the GPU and the container's own view are specific to
 it; hwmon, thermal zones and RDMA ports are the host's, as `/sys` is.
 
+## Moving a host from sparkview-exporter
+
+Install `vitals` as above, then stop and remove the old unit before starting
+the new one, since both want :9420:
+
+```sh
+sudo systemctl disable --now sparkview-exporter
+sudo rm /etc/systemd/system/sparkview-exporter.service && sudo systemctl daemon-reload
+sudo systemctl enable --now vitals
+sudo rm -r /opt/sparkview-exporter && sudo userdel sparkview-exporter
+curl -s localhost:9420/metrics.json | jq .gpus[0].throttle
+```
+
+In a container that uses `entrypoint.sh`, copy the files to `/opt/vitals`, then
+`pct set <ctid> --entrypoint /opt/vitals/entrypoint.sh` and restart it.
+`SPARKVIEW_PORT` is now `VITALS_PORT`.
+
 ## Tests
 
 ```sh
 python3 -m venv .venv
-.venv/bin/pip install psutil pytest nvidia-ml-py httpx fastapi -e ../../pulsar-tui
-.venv/bin/pip install --no-deps -e ../../pulsar-gui   # its pyproject pins pulsar-tui by path
+.venv/bin/pip install psutil pytest nvidia-ml-py httpx fastapi -e ../../pulsar/tui
+.venv/bin/pip install --no-deps -e ../../pulsar/gui   # its pyproject pins pulsar-tui by path
 .venv/bin/python -m pytest -q
 ```
 

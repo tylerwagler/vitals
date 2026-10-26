@@ -1,8 +1,8 @@
 #!/bin/sh
-# Entrypoint for a Proxmox app (OCI) container: run sparkview-exporter
+# Entrypoint for a Proxmox app (OCI) container: run vitals
 # alongside the workload, then become the workload.
 #
-#   pct set <ctid> --entrypoint /opt/sparkview-exporter/entrypoint.sh
+#   pct set <ctid> --entrypoint /opt/vitals/entrypoint.sh
 #
 # The workload is this script's arguments, or /app/llama-server without any.
 # It is exec'd, so it stays PID 1: the container's stop signal reaches it
@@ -12,13 +12,13 @@
 # exporter's parent, so a dead exporter is reaped here rather than left for
 # a PID 1 that never expected children.
 
-EXPORTER=/opt/sparkview-exporter/sparkview_exporter.py
+EXPORTER=/opt/vitals/vitals.py
 
 (
     while :; do
         setpriv --reuid=nobody --regid=nogroup --clear-groups --no-new-privs \
-            /usr/bin/python3 "$EXPORTER" --port "${SPARKVIEW_PORT:-9420}" </dev/null
-        echo "sparkview-exporter exited ($?); restarting in 15 s" >&2
+            /usr/bin/python3 "$EXPORTER" --port "${VITALS_PORT:-9420}" </dev/null
+        echo "vitals exited ($?); restarting in 15 s" >&2
         sleep 15
     done
 ) &

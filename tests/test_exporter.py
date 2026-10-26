@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-import sparkview_exporter as sx
+import vitals as sx
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

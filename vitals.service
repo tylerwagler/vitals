@@ -1,11 +1,11 @@
 [Unit]
-Description=sparkview-exporter: GPU and host state as JSON for pulsar-gui (:9420)
+Description=vitals: GPU and host state as JSON for pulsar-gui (:9420)
 After=network-online.target nvidia-persistenced.service
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /opt/sparkview-exporter/sparkview_exporter.py --port 9420
+ExecStart=/usr/bin/python3 /opt/vitals/vitals.py --port 9420
 Restart=on-failure
 RestartSec=2
 
@@ -13,8 +13,8 @@ RestartSec=2
 # needs only a bare system account and no write access anywhere. Not DynamicUser:
 # combined with the settings below it cuts systemctl off from systemd, and the
 # clock-cap check then reads every unit as inactive.
-User=sparkview-exporter
-Group=sparkview-exporter
+User=vitals
+Group=vitals
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
