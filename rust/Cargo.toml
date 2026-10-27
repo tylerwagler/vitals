@@ -1,0 +1,22 @@
+[package]
+name = "vitals"
+version = "0.3.0"
+edition = "2021"
+description = "One host's hardware, OS and live state as JSON over HTTP, with a Server-Sent Events stream"
+license = "MIT"
+publish = false
+
+[dependencies]
+# NVML is loaded at runtime (libloading), so the binary runs on hosts without a driver.
+nvml-wrapper-sys = "0.10"
+serde_json = { version = "1", features = ["preserve_order"] }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+sha1_smol = "1"
+libc = "0.2"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "unwind"   # a collector bug is caught per section, as in Python
+strip = true
