@@ -211,3 +211,57 @@ def test_uma_means_nvml_cannot_report_the_memory():
     assert gpu.gpu_memory(card, vm) == (False, 16 * 2**30, 13 * 2**30)
     # GB10: NVML reports no device memory; the host's is the GPU's.
     assert gpu.gpu_memory(None, vm) == (True, 16 * 2**30, 10 * 2**30)
+
+
+# -- carried over from pulsar-gui's exporter (051526e) -----------------------
+
+
+class _FakeProc:
+    def __init__(self, pid, args, parent=None):
+        self.pid, self._args, self._parent = pid, args, parent
+
+    def cmdline(self):
+        return self._args
+
+    def parent(self):
+        return self._parent
+
+
+def test_served_port_is_inherited_from_the_server_that_took_it():
+    api = _FakeProc(40, ["python3", "-m", "vllm.entrypoints.openai.api_server", "--port", "8001"],
+                    _FakeProc(1, ["/sbin/init"]))
+    worker = _FakeProc(42, ["VLLM::Worker_TP0"], _FakeProc(41, ["VLLM::EngineCore"], api))
+    assert gpu.served_port(worker) == 8001
+    assert gpu.served_port(_FakeProc(7, ["pulsar-server", "-m", "m", "--port=8000"])) == 8000
+    assert gpu.served_port(_FakeProc(8, ["pulsar-server", "--tp-rank", "1"], _FakeProc(1, []))) is None
+
+
+def test_prometheus_text_keeps_the_reference_series():
+    """The Switchyard dashboard scrapes /metrics for these names; a drop-in
+    replacement must keep them."""
+    from vitals.prometheus import render_prometheus
+
+    text = render_prometheus(load("reference-0.6.0.json"))
+    for series in ("sparkview_up", "sparkview_build_info", "sparkview_gpu_utilization_percent",
+                   "sparkview_gpu_temperature_celsius", "sparkview_gpu_power_watts",
+                   "sparkview_gpu_memory_used_bytes", "sparkview_gpu_clock_mhz",
+                   "sparkview_memory_used_percent", "sparkview_net_up", "sparkview_prochot",
+                   "sparkview_uptime_seconds", "sparkview_rdma_transmit_bytes_total"):
+        assert f"\n{series}" in "\n" + text, series
+
+
+def test_a_clock_cap_given_as_a_variable_is_resolved(tmp_path):
+    """spark-a's unit: `-lgc 0,${GPU_CLOCK_MAX}`, the value in an
+    EnvironmentFile. The cap must come through, not vanish."""
+    env_file = tmp_path / "gpu-clock-cap"
+    env_file.write_text("# thermal mitigation\nGPU_CLOCK_MAX=2300\n")
+    unit = (
+        "[Service]\n"
+        f"EnvironmentFile=-{env_file}\n"
+        'Environment="OTHER=1"\n'
+        'ExecStart=/bin/sh -c "for i in $(seq 10); do /usr/bin/nvidia-smi -lgc 0,${GPU_CLOCK_MAX} && exit 0; done"\n'
+    )
+    env = gpu.unit_environment(unit)
+    assert env["GPU_CLOCK_MAX"] == "2300" and env["OTHER"] == "1"
+    exec_start = " ".join(l for l in unit.splitlines() if l.startswith("ExecStart"))
+    assert gpu.parse_lgc(gpu.expand_unit_vars(exec_start, env)) == 2300.0

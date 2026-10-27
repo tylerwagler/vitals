@@ -24,7 +24,8 @@ from typing import Any
 import psutil
 
 from . import __version__
-from .collect.gpu import CLOCK_THRESHOLD_MHZ, EVENT_FIELDS, PROBLEM_BITS, ClockCap, Nvml, clock_status, decode_reasons, gpu_memory, reasons
+from .collect.gpu import (CLOCK_THRESHOLD_MHZ, EVENT_FIELDS, PROBLEM_BITS, ClockCap, Nvml, clock_status,
+                          decode_reasons, gpu_memory, reasons, served_port)
 from .collect.memory import psi_level
 from .collect.network import rdma, rdma_netlink_counters
 from .collect.sensors import Spbm
@@ -37,6 +38,7 @@ class Gpus:
     def __init__(self, nv: Nvml) -> None:
         self.nv = nv
         self._procs: dict[int, psutil.Process] = {}
+        self._ports: dict[int, int | None] = {}
 
     def driver(self) -> dict[str, str]:
         if not self.nv.init():
@@ -45,11 +47,18 @@ class Gpus:
         return {"driver": versions["driver"] or "", "cuda": versions["cuda"] or ""}
 
     def collect(self, vm: Any, clock_cap: dict[str, Any] | None) -> tuple[list[dict], list[dict]]:
-        gpus, processes = [], []
+        gpus, processes, seen = [], [], set()
         for index, handle in self.nv.handles():
             gpu, procs = self._one(index, handle, vm, clock_cap)
             gpus.append(gpu)
             processes.extend(procs)
+            seen.update(r["pid"] for r in procs)
+        # Forgotten once no card has them, not per card: a process on two
+        # cards keeps its CPU interval.
+        for pid in set(self._procs) - seen:
+            del self._procs[pid]
+        for pid in set(self._ports) - set(self._procs):
+            del self._ports[pid]
         return gpus, processes
 
     def _one(self, index: int, h: Any, vm: Any, clock_cap: dict[str, Any] | None) -> tuple[dict, list[dict]]:
@@ -76,7 +85,7 @@ class Gpus:
             "clock_event_seconds": self._events(h),
             "clock_cap": clock_cap,
         }
-        return gpu, self._processes(h)
+        return gpu, self._processes(h, index)
 
     def _throttle(self, index: int, h: Any, util_pct: int | None) -> dict[str, Any]:
         call, nv = self.nv.call, self.nv
@@ -126,7 +135,7 @@ class Gpus:
             if v.nvmlReturn == nv.lib.NVML_SUCCESS
         }
 
-    def _processes(self, h: Any) -> list[dict[str, Any]]:
+    def _processes(self, h: Any, index: int) -> list[dict[str, Any]]:
         running = []
         for fn in ("nvmlDeviceGetComputeRunningProcesses", "nvmlDeviceGetGraphicsRunningProcesses"):
             running.extend(self.nv.call(fn, h) or [])
@@ -136,9 +145,9 @@ class Gpus:
                 continue
             seen.add(p.pid)
             gpu_mem = getattr(p, "usedGpuMemory", None)
-            row: dict[str, Any] = {"pid": p.pid, "user": None, "cmd": None,
+            row: dict[str, Any] = {"pid": p.pid, "gpu": index, "user": None, "cmd": None,
                                    "gpu_mem": gpu_mem if isinstance(gpu_mem, int) else None,
-                                   "cpu_pct": None}
+                                   "cpu_pct": None, "ppid": None, "port": None}
             try:
                 # Keep the Process so cpu_percent measures since the last scrape.
                 proc = self._procs.get(p.pid)
@@ -148,11 +157,14 @@ class Gpus:
                 row["user"] = proc.username()
                 row["cmd"] = proc.name()
                 row["cpu_pct"] = proc.cpu_percent(None)
+                row["ppid"] = proc.ppid()
+                # A process's served port does not change: look it up once.
+                if p.pid not in self._ports:
+                    self._ports[p.pid] = served_port(proc)
+                row["port"] = self._ports[p.pid]
             except (psutil.Error, KeyError):
                 pass
             out.append(row)
-        for pid in set(self._procs) - seen:
-            del self._procs[pid]
         return sorted(out, key=lambda r: r["gpu_mem"] or 0, reverse=True)
 
 

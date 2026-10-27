@@ -165,6 +165,161 @@ pub fn parse_lgc(exec_start: &str) -> Option<f64> {
     None
 }
 
+/// The variables a unit's ExecStart sees from `Environment=` and
+/// `EnvironmentFile=` (a leading `-` marks a file that may be missing).
+pub fn unit_environment(unit_text: &str) -> HashMap<String, String> {
+    let mut env = HashMap::new();
+    let mut assign = |pair: &str| {
+        if let Some((k, v)) = pair.trim().split_once('=') {
+            if !k.trim().is_empty() {
+                env.insert(k.trim().to_string(), v.trim().trim_matches('"').trim_matches('\'').to_string());
+            }
+        }
+    };
+    for line in unit_text.lines() {
+        let line = line.trim();
+        if let Some(path) = line.strip_prefix("EnvironmentFile=") {
+            let path = path.trim().trim_start_matches('-');
+            for entry in read_text(path).unwrap_or_default().lines() {
+                if !entry.trim().is_empty() && !entry.trim_start().starts_with('#') {
+                    assign(entry);
+                }
+            }
+        } else if let Some(rest) = line.strip_prefix("Environment=") {
+            // "quoted pairs" or bare words, as systemd splits them
+            let mut chars = rest.chars().peekable();
+            while chars.peek().is_some() {
+                while chars.peek().is_some_and(|c| c.is_whitespace()) {
+                    chars.next();
+                }
+                let mut word = String::new();
+                if chars.peek() == Some(&'"') {
+                    chars.next();
+                    for c in chars.by_ref() {
+                        if c == '"' {
+                            break;
+                        }
+                        word.push(c);
+                    }
+                } else {
+                    while let Some(&c) = chars.peek() {
+                        if c.is_whitespace() {
+                            break;
+                        }
+                        word.push(c);
+                        chars.next();
+                    }
+                }
+                if !word.is_empty() {
+                    assign(word.trim_matches('"'));
+                }
+            }
+        }
+    }
+    env
+}
+
+/// `${NAME}` and `$NAME` replaced as systemd does; unknown names are left.
+pub fn expand_unit_vars(text: &str, env: &HashMap<String, String>) -> String {
+    let b = text.as_bytes();
+    let mut out = String::new();
+    let mut i = 0;
+    let word = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    while i < b.len() {
+        if b[i] == b'$' {
+            if b.get(i + 1) == Some(&b'{') {
+                if let Some(end) = text[i + 2..].find('}') {
+                    let name = &text[i + 2..i + 2 + end];
+                    if !name.is_empty() && name.bytes().all(word) {
+                        match env.get(name) {
+                            Some(v) => out.push_str(v),
+                            None => out.push_str(&text[i..i + 3 + end]),
+                        }
+                        i += 3 + end;
+                        continue;
+                    }
+                }
+            } else {
+                let n = b[i + 1..].iter().take_while(|&&c| word(c)).count();
+                if n > 0 {
+                    let name = &text[i + 1..i + 1 + n];
+                    match env.get(name) {
+                        Some(v) => out.push_str(v),
+                        None => out.push_str(&text[i..i + 1 + n]),
+                    }
+                    i += 1 + n;
+                    continue;
+                }
+            }
+        }
+        let ch = text[i..].chars().next().unwrap_or('\0');
+        out.push(ch);
+        i += ch.len_utf8().max(1);
+    }
+    out
+}
+
+fn cmdline(pid: i64) -> Vec<String> {
+    std::fs::read(format!("/proc/{pid}/cmdline"))
+        .map(|b| b.split(|&c| c == 0).filter(|a| !a.is_empty()).map(|a| String::from_utf8_lossy(a).into_owned()).collect())
+        .unwrap_or_default()
+}
+
+/// The port a GPU process serves on: the first `--port` on its own command
+/// line or an ancestor's.
+///
+/// A GPU process is often not the server itself: vLLM's `EngineCore` and
+/// `Worker_TP*` are children of the API server that took `--port`. A command
+/// line is world-readable where the process's sockets are not (a container's
+/// root-owned process, read by this exporter's own account), so this is what
+/// lets pulsar-gui tell which service a card belongs to when one exporter
+/// answers for several. None when no ancestor says.
+pub fn served_port_of(args_of: impl Fn(i64) -> Vec<String>, parent_of: impl Fn(i64) -> Option<i64>, pid: i64) -> Option<i64> {
+    let mut p = pid;
+    for _ in 0..8 {
+        let args = args_of(p);
+        for (i, arg) in args.iter().enumerate() {
+            let Some(rest) = arg.strip_prefix("--port") else { continue };
+            let value = if rest.is_empty() {
+                args.get(i + 1).cloned().unwrap_or_default()
+            } else if let Some(v) = rest.strip_prefix('=').filter(|v| !v.is_empty() && v.bytes().all(|c| c.is_ascii_digit())) {
+                v.to_string()
+            } else {
+                continue;
+            };
+            if !value.is_empty() && value.bytes().all(|c| c.is_ascii_digit()) {
+                return value.parse().ok();
+            }
+        }
+        p = parent_of(p)?;
+        if p <= 1 {
+            return None;
+        }
+    }
+    None
+}
+
+pub fn served_port(pid: i64) -> Option<i64> {
+    served_port_of(cmdline, |p| read_proc(p).map(|p| p.ppid), pid)
+}
+
+/// A process's served port does not change: looked up once per process
+/// (pid and start time), for every table that shows it.
+pub fn served_port_cached(pid: i64, start_ticks: i64) -> Option<i64> {
+    static CACHE: Mutex<Option<HashMap<(i64, i64), Option<i64>>>> = Mutex::new(None);
+    if let Some(v) = CACHE.lock().unwrap().get_or_insert_with(HashMap::new).get(&(pid, start_ticks)) {
+        return *v;
+    }
+    let port = served_port(pid);
+    let mut c = CACHE.lock().unwrap();
+    let cache = c.get_or_insert_with(HashMap::new);
+    if cache.len() > 4096 {
+        cache.clear(); // processes come and go; a bound, not an eviction policy
+    }
+    cache.insert((pid, start_ticks), port);
+    port
+}
+
 /// A lab clamp set by a ``*clock-cap.service`` unit, which NVML cannot see.
 /// Reported only while the unit is active: an installed but stopped unit
 /// clamps nothing. Checked at most every 10 s, since it costs a subprocess.
@@ -198,7 +353,9 @@ impl ClockCap {
                 }
                 let body = read_text(&path).unwrap_or_default();
                 let exec: Vec<&str> = body.lines().filter(|l| l.trim().starts_with("ExecStart")).collect();
-                let Some(cap) = parse_lgc(&exec.join(" ")) else { continue };
+                // The cap is often a variable (`-lgc 0,${GPU_CLOCK_MAX}`) set
+                // in an EnvironmentFile; resolve it the way systemd would.
+                let Some(cap) = parse_lgc(&expand_unit_vars(&exec.join(" "), &unit_environment(&body))) else { continue };
                 let active = std::process::Command::new("systemctl")
                     .args(["is-active", "--quiet", &unit])
                     .status()
@@ -714,6 +871,8 @@ fn process_rows(g: &Gpu) -> Vec<Value> {
                 "pid": pid, "type": kind,
                 "name": p.as_ref().map(|p| p.name.clone()),
                 "user": p.as_ref().and_then(|p| p.uid).map(os::user_name),
+                "ppid": p.as_ref().map(|p| p.ppid),
+                "port": p.as_ref().and_then(|p| served_port_cached(p.pid, p.start_ticks)),
                 "gpu_memory_bytes": mem,
             })
         })
@@ -874,6 +1033,42 @@ mod tests {
         assert_eq!(parse_lgc("ExecStart=/usr/bin/nvidia-smi -lgc 300,2200"), Some(2200.0));
         assert_eq!(parse_lgc("ExecStart=nvidia-smi --lock-gpu-clocks=300,2300"), Some(2300.0));
         assert_eq!(parse_lgc("ExecStart=/usr/bin/true"), None);
+    }
+
+    #[test]
+    fn served_port_is_inherited_from_the_server_that_took_it() {
+        let procs: HashMap<i64, (Vec<&str>, i64)> = [
+            (1, (vec!["/sbin/init"], 0)),
+            (40, (vec!["python3", "-m", "vllm.entrypoints.openai.api_server", "--port", "8001"], 1)),
+            (41, (vec!["VLLM::EngineCore"], 40)),
+            (42, (vec!["VLLM::Worker_TP0"], 41)),
+            (7, (vec!["pulsar-server", "-m", "m", "--port=8000"], 0)),
+            (8, (vec!["pulsar-server", "--tp-rank", "1"], 1)),
+        ].into_iter().collect();
+        let args = |p: i64| procs.get(&p).map(|(a, _)| a.iter().map(|s| s.to_string()).collect()).unwrap_or_default();
+        let parent = |p: i64| procs.get(&p).map(|(_, pp)| *pp).filter(|pp| *pp != 0);
+        assert_eq!(served_port_of(args, parent, 42), Some(8001));
+        assert_eq!(served_port_of(args, parent, 7), Some(8000));
+        assert_eq!(served_port_of(args, parent, 8), None);
+    }
+
+    #[test]
+    fn a_clock_cap_given_as_a_variable_is_resolved() {
+        let dir = std::env::temp_dir().join(format!("vitals-cap-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let env_file = dir.join("gpu-clock-cap");
+        std::fs::write(&env_file, "# thermal mitigation\nGPU_CLOCK_MAX=2300\n").unwrap();
+        let unit = format!(
+            "[Service]\nEnvironmentFile=-{}\nEnvironment=\"OTHER=1\"\nExecStart=/bin/sh -c \"for i in $(seq 10); do /usr/bin/nvidia-smi -lgc 0,${{GPU_CLOCK_MAX}} && exit 0; done\"\n",
+            env_file.display()
+        );
+        let env = unit_environment(&unit);
+        assert_eq!(env["GPU_CLOCK_MAX"], "2300");
+        assert_eq!(env["OTHER"], "1");
+        let exec: Vec<&str> = unit.lines().filter(|l| l.starts_with("ExecStart")).collect();
+        assert_eq!(parse_lgc(&expand_unit_vars(&exec.join(" "), &env)), Some(2300.0));
+        assert_eq!(expand_unit_vars("a $UNKNOWN ${ALSO} b", &env), "a $UNKNOWN ${ALSO} b");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

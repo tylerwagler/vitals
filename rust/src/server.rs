@@ -44,6 +44,7 @@ const ENDPOINTS: &[(&str, &str)] = &[
     ("/v1/processes", "the process table; ?top=25&sort=cpu|memory|gpu"),
     ("/v1/stream", "Server-Sent Events: hello, sample, static; ?interval=1&sections=a,b&static=1"),
     ("/metrics.json", "pulsar-gui's cluster snapshot (reference sparkview-exporter 0.6.0 shape)"),
+    ("/metrics", "the same snapshot as Prometheus text, in the reference 0.6.0's sparkview_* series"),
 ];
 
 fn endpoints() -> Value {
@@ -308,6 +309,7 @@ impl Server {
             "/" => self.index(&mut c, pretty),
             "/health" | "/healthz" => self.health(&mut c, pretty),
             "/metrics.json" => c.json_bytes(200, &self.legacy.body(), pretty, vec![]).map(|_| Ok(())),
+            "/metrics" => self.prometheus(&mut c).map(|_| Ok(())),
             p if p == "/v1/static" || p.starts_with("/v1/static/") => self.static_(&mut c, p, q, pretty),
             p if p == "/v1/live" || p.starts_with("/v1/live/") => self.live(&mut c, p, q, pretty),
             "/v1/processes" => self.processes(&mut c, q, pretty),
@@ -321,6 +323,19 @@ impl Server {
                 Ok(Outcome::KeepAlive)
             }
         }
+    }
+
+    /// Rendered from the /metrics.json snapshot, so the two cannot disagree
+    /// and a scraper and pulsar-gui polling together cost one reading.
+    fn prometheus(&self, c: &mut Conn) -> io::Result<()> {
+        let snapshot: Value = serde_json::from_slice(&self.legacy.body()).unwrap_or(Value::Null);
+        let body = crate::prometheus::render(&snapshot);
+        c.head(200, &[("Content-Type", "text/plain; version=0.0.4; charset=utf-8".into()),
+                      ("Content-Length", body.len().to_string())], !c.req.keep_alive)?;
+        if c.req.method != "HEAD" {
+            c.stream.write_all(body.as_bytes())?;
+        }
+        c.stream.flush()
     }
 
     fn index(&self, c: &mut Conn, pretty: bool) -> io::Result<Result<(), BadRequest>> {

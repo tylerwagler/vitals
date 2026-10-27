@@ -25,6 +25,7 @@ from . import __version__
 from .collect.processes import SORTS
 from .hub import LIVE_SECTIONS, STATIC_SECTIONS, Hub, pick
 from .legacy import Exporter
+from .prometheus import render_prometheus
 
 logger = logging.getLogger("vitals")
 
@@ -44,6 +45,7 @@ ENDPOINTS = {
     "/v1/processes": "the process table; ?top=25&sort=cpu|memory|gpu",
     "/v1/stream": "Server-Sent Events: hello, sample, static; ?interval=1&sections=a,b&static=1",
     "/metrics.json": "pulsar-gui's cluster snapshot (reference sparkview-exporter 0.6.0 shape)",
+    "/metrics": "the same snapshot as Prometheus text, in the reference 0.6.0's sparkview_* series",
 }
 
 
@@ -159,6 +161,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.health(pretty)
             elif path == "/metrics.json":
                 self.metrics_json()
+            elif path == "/metrics":
+                self.metrics_prometheus()
             elif path == "/v1/static" or path.startswith("/v1/static/"):
                 self.static(path, query, pretty)
             elif path == "/v1/live" or path.startswith("/v1/live/"):
@@ -209,6 +213,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def metrics_json(self) -> None:
         self.send_json(200, self.server.legacy.body())
+
+    def metrics_prometheus(self) -> None:
+        body = render_prometheus(json.loads(self.server.legacy.body())).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self._common_headers()
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
 
     def static(self, path: str, query: dict[str, list[str]], pretty: bool) -> None:
         sub = path[len("/v1/static/"):] if path.startswith("/v1/static/") else None

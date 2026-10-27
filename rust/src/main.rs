@@ -5,6 +5,7 @@ mod collect;
 mod hub;
 mod legacy;
 mod os;
+mod prometheus;
 mod rates;
 mod server;
 mod sysfs;
@@ -57,6 +58,11 @@ fn parse_args() -> Result<Args, String> {
                     it.next_if(|n| matches!(n.as_str(), "all" | "static" | "live" | "processes" | "metrics"))
                 });
                 a.once = Some(what.unwrap_or_else(|| "all".into()));
+            }
+            // Accepted so a unit written for the reference 0.6.0 starts this one
+            // unchanged; every GPU process is reported and every interface is read.
+            "--process-limit" | "--net" | "--token" => {
+                value(&flag)?;
             }
             "-v" | "--verbose" => a.verbose = true,
             "-V" | "--version" => {

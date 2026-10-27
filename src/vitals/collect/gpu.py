@@ -121,6 +121,70 @@ def parse_lgc(exec_start: str) -> float | None:
     return float(match.group(2)) if match else None
 
 
+def unit_environment(unit_text: str) -> dict[str, str]:
+    """The variables a unit's ExecStart sees from ``Environment=`` and
+    ``EnvironmentFile=`` (a leading ``-`` marks a file that may be missing)."""
+    env: dict[str, str] = {}
+
+    def assign(pair: str) -> None:
+        key, sep, value = pair.strip().partition("=")
+        if sep and key:
+            env[key.strip()] = value.strip().strip('"').strip("'")
+
+    for line in unit_text.splitlines():
+        line = line.strip()
+        if line.startswith("EnvironmentFile="):
+            path = line.partition("=")[2].strip().lstrip("-")
+            for entry in (read_text(path) or "").splitlines():
+                if entry.strip() and not entry.lstrip().startswith("#"):
+                    assign(entry)
+        elif line.startswith("Environment="):
+            for pair in re.findall(r'"[^"]*"|\S+', line.partition("=")[2]):
+                assign(pair.strip('"'))
+    return env
+
+
+def expand_unit_vars(text: str, env: dict[str, str]) -> str:
+    """``${NAME}`` and ``$NAME`` replaced as systemd does; unknown names are left."""
+    return re.sub(r"\$\{(\w+)\}|\$(\w+)",
+                  lambda m: env.get(m.group(1) or m.group(2), m.group(0)), text)
+
+
+_PORT_ARG = re.compile(r"^--port(?:=(\d+))?$")
+
+
+def served_port(proc: Any, depth: int = 8) -> int | None:
+    """The port a GPU process serves on: the first ``--port`` on its own
+    command line or an ancestor's.
+
+    A GPU process is often not the server itself: vLLM's ``EngineCore`` and
+    ``Worker_TP*`` are children of the API server that took ``--port``. A
+    command line is world-readable where the process's sockets are not (a
+    container's root-owned process, read by this exporter's own account), so
+    this is what lets pulsar-gui tell which service a card belongs to when one
+    exporter answers for several. None when no ancestor says.
+    """
+    p = proc
+    for _ in range(depth):
+        try:
+            args = p.cmdline()
+        except psutil.Error:
+            args = []
+        for i, arg in enumerate(args):
+            m = _PORT_ARG.match(arg)
+            if m:
+                value = m.group(1) or (args[i + 1] if i + 1 < len(args) else "")
+                if value.isdigit():
+                    return int(value)
+        try:
+            p = p.parent()
+        except psutil.Error:
+            return None
+        if p is None or p.pid <= 1:
+            return None
+    return None
+
+
 class ClockCap:
     """A lab clamp set by a ``*clock-cap.service`` unit, which NVML cannot see.
 
@@ -153,9 +217,11 @@ class ClockCap:
                     continue
                 seen.add(unit)
                 body = read_text(path) or ""
-                cap = parse_lgc(" ".join(
+                # The cap is often a variable (`-lgc 0,${GPU_CLOCK_MAX}`) set
+                # in an EnvironmentFile; resolve it the way systemd would.
+                cap = parse_lgc(expand_unit_vars(" ".join(
                     line for line in body.splitlines() if line.strip().startswith("ExecStart")
-                ))
+                ), unit_environment(body)))
                 if cap is None:
                     continue
                 try:
@@ -391,11 +457,14 @@ class GpuProcesses:
 
     def __init__(self) -> None:
         self._procs: dict[int, psutil.Process] = {}
+        self._ports: dict[int, int | None] = {}
         self._seen: set[int] = set()
 
     def prune(self) -> None:
         for pid in set(self._procs) - self._seen:
             del self._procs[pid]
+        for pid in set(self._ports) - set(self._procs):
+            del self._ports[pid]
         self._seen = set()
 
     def rows(self, nv: Nvml, h: Any) -> list[dict[str, Any]]:
@@ -409,12 +478,17 @@ class GpuProcesses:
                 self._seen.add(p.pid)
                 mem = getattr(p, "usedGpuMemory", None)
                 row: dict[str, Any] = {"pid": p.pid, "type": kind, "name": None, "user": None,
+                                       "ppid": None, "port": None,
                                        "gpu_memory_bytes": mem if isinstance(mem, int) else None}
                 try:
                     proc = self._procs.get(p.pid)
                     if proc is None or not proc.is_running():
                         proc = self._procs[p.pid] = psutil.Process(p.pid)
-                    row["name"], row["user"] = proc.name(), proc.username()
+                    row["name"], row["user"], row["ppid"] = proc.name(), proc.username(), proc.ppid()
+                    # A process's served port does not change: look it up once.
+                    if p.pid not in self._ports:
+                        self._ports[p.pid] = served_port(proc)
+                    row["port"] = self._ports[p.pid]
                 except (psutil.Error, KeyError):
                     pass  # another PID namespace: the container cannot see the host's PIDs
                 out.append(row)

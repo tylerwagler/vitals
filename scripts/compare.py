@@ -2,6 +2,11 @@
 """Run two vitals builds side by side on this host and diff what they say.
 
     scripts/compare.py "python3 dist/vitals.pyz" rust/target/release/vitals
+    scripts/compare.py http://localhost:9420 dist/vitals-x86_64     # against a running exporter
+
+A side that is a URL is read, not started; its /v1 endpoints are skipped if
+it has none (a sparkview-exporter has only /metrics.json and /metrics).
+/metrics (Prometheus text) is compared as the set of series and labels.
 
 Static values must be equal. Live readings move between two reads, so for
 those only the shape is compared: the same keys, and a reading present on
@@ -13,6 +18,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import re
 import shlex
 import socket
 import subprocess
@@ -38,15 +44,18 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
-def start(command: str) -> tuple[subprocess.Popen, int]:
+def start(command: str) -> tuple[subprocess.Popen | None, str]:
+    if command.startswith("http://"):
+        return None, command.rstrip("/")
     port = free_port()
     proc = subprocess.Popen([*shlex.split(command), "--host", "127.0.0.1", "--port", str(port)],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     deadline = time.monotonic() + 20
     while True:
         try:
-            fetch(port, "/health")
-            return proc, port
+            base = f"http://127.0.0.1:{port}"
+            fetch(base, "/health")
+            return proc, base
         except OSError:
             if proc.poll() is not None or time.monotonic() > deadline:
                 proc.kill()
@@ -54,13 +63,35 @@ def start(command: str) -> tuple[subprocess.Popen, int]:
             time.sleep(0.1)
 
 
-def fetch(port: int, path: str):
-    req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", headers={"Accept-Encoding": "gzip"})
+def fetch_raw(base: str, path: str) -> bytes:
+    req = urllib.request.Request(f"{base}{path}", headers={"Accept-Encoding": "gzip"})
     with urllib.request.urlopen(req, timeout=60) as r:
         body = r.read()
         if r.headers.get("Content-Encoding") == "gzip":
             body = gzip.decompress(body)
-    return json.loads(body)
+    return body
+
+
+def fetch(base: str, path: str):
+    return json.loads(fetch_raw(base, path))
+
+
+def series(text: str) -> set[str]:
+    """Each sample's name and labels, without its value or the exporter's version."""
+    out = set()
+    for line in text.splitlines():
+        if line and not line.startswith("#"):
+            key = line.rsplit(" ", 1)[0]
+            out.add(re.sub(r'exporter_version="[^"]*",?', "", key))
+    return out
+
+
+def has(base: str, path: str) -> bool:
+    try:
+        fetch_raw(base, path)
+        return True
+    except (OSError, ValueError):
+        return False
 
 
 def kind(v) -> str:
@@ -106,6 +137,9 @@ def main() -> int:
     try:
         found = 0
         for mode, path in (("static", "/v1/static"), ("live", "/v1/live"), ("metrics", "/metrics.json")):
+            if mode != "metrics" and not (has(a[1], path) and has(b[1], path)):
+                print(f"== {path}: skipped (one side has no /v1 API)")
+                continue
             if mode != "static":
                 # two reads each, so both have rates
                 fetch(a[1], path), fetch(b[1], path)
@@ -116,10 +150,22 @@ def main() -> int:
             for line in out:
                 print("  " + line)
             found += len(out)
+        sa, sb = series(fetch_raw(a[1], "/metrics").decode()), series(fetch_raw(b[1], "/metrics").decode())
+        # GPU processes come and go between two reads; their series are not compared.
+        moving = re.compile(r"^sparkview_process_")
+        only_a = sorted(s for s in sa - sb if not moving.match(s))
+        only_b = sorted(s for s in sb - sa if not moving.match(s))
+        print(f"== /metrics: {len(sa)} vs {len(sb)} series, {len(only_a) + len(only_b)} difference(s)")
+        for s in only_a:
+            print(f"  only in A: {s}")
+        for s in only_b:
+            print(f"  only in B: {s}")
+        found += len(only_a) + len(only_b)
         return 1 if found else 0
     finally:
         for proc, _ in (a, b):
-            proc.terminate()
+            if proc is not None:
+                proc.terminate()
 
 
 if __name__ == "__main__":

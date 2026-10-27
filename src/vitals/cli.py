@@ -31,6 +31,10 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--port", type=int, default=9420, help="listen port (default 9420)")
     parser.add_argument("--max-streams", type=int, default=8, help="concurrent /v1/stream subscribers (default 8)")
     parser.add_argument("--keepalive", type=float, default=15.0, help=argparse.SUPPRESS)  # tests shorten it
+    # Accepted so a unit written for the reference 0.6.0 starts this one
+    # unchanged; every GPU process is reported and every interface is read.
+    for legacy_flag in ("--process-limit", "--net", "--token"):
+        parser.add_argument(legacy_flag, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--once", nargs="?", const="all", metavar="WHAT",
                         choices=("all", "static", "live", "processes", "metrics"),
                         help="print one reading and exit: all (default), static, live, processes, metrics")

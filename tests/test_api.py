@@ -280,3 +280,48 @@ def test_metrics_json_has_the_reference_fields_this_host_has(srv, path):
     if path in (("rdma", 0, "hw_counters"), ("rdma", 0, "errors")) and not mine:
         pytest.skip("this port has no counters")  # a down port seen from a container has none
     assert keys(ref, *path) <= mine
+
+
+def test_prometheus_metrics_keep_the_reference_series(srv):
+    """GET /metrics, which the Switchyard dashboard scrapes: the reference
+    0.6.0's sparkview_* series every host has, from the /metrics.json snapshot."""
+    resp, body = get(srv, "/metrics")
+    assert resp.status == 200 and resp.getheader("Content-Type").startswith("text/plain; version=0.0.4")
+    text = body.decode()
+    for series in ("sparkview_up", "sparkview_build_info", "sparkview_uptime_seconds",
+                   "sparkview_memory_used_percent", "sparkview_cpu_cores_total",
+                   "sparkview_scrape_duration_seconds"):
+        assert f"\n{series}{{" in "\n" + text, series
+    _, snap = get_json(srv, "/metrics.json")
+    if snap["gpus"]:
+        assert "\nsparkview_gpu_utilization_percent{" in text and "\nsparkview_gpu_info{" in text
+
+
+def test_metrics_json_processes_say_which_card_and_service(srv):
+    _, snap = get_json(srv, "/metrics.json")
+    for p in snap["processes"]:
+        assert {"pid", "gpu", "user", "cmd", "gpu_mem", "cpu_pct", "ppid", "port"} <= set(p)
+    if not snap["processes"]:
+        pytest.skip("no GPU processes on this host")
+
+
+def test_a_unit_written_for_the_reference_starts_unchanged():
+    """--process-limit, --net and --token, which 0.6.0's units pass, are accepted."""
+    command = os.environ.get("VITALS_BIN") or "python3 dist/vitals.pyz"
+    port = free_port()
+    proc = subprocess.Popen([*shlex.split(command), "--host", "127.0.0.1", "--port", str(port),
+                             "--process-limit", "5", "--net", "physical", "--token", "x"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    try:
+        target, deadline = Target(port), time.monotonic() + 15
+        while True:
+            try:
+                assert target.health()["status"] == "ok"
+                break
+            except OSError:
+                assert proc.poll() is None, proc.stderr.read().decode()[-500:]
+                assert time.monotonic() < deadline
+                time.sleep(0.05)
+    finally:
+        proc.terminate()
+        proc.wait(5)

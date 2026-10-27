@@ -12,7 +12,7 @@ use std::time::Instant;
 
 use serde_json::{json, Map, Value};
 
-use crate::collect::gpu::{clock_status, decode_reasons, gpu_memory, Gpu, U32, CLOCK_THRESHOLD_MHZ, PROBLEM_BITS};
+use crate::collect::gpu::{served_port_cached, clock_status, decode_reasons, gpu_memory, Gpu, U32, CLOCK_THRESHOLD_MHZ, PROBLEM_BITS};
 use crate::collect::memory::{meminfo, psi_level};
 use crate::collect::network::{rdma, rdma_netlink_counters, IB_ROOT};
 use crate::collect::processes::read_proc;
@@ -257,6 +257,7 @@ impl Exporter {
             .filter(|(pid, _, _)| seen.insert(*pid as i64))
             .map(|(pid, mem, _)| {
                 let pid = pid as i64;
+                let index = g.index;
                 let p = read_proc(pid);
                 // cpu_pct since the last scrape this process was seen in, as
                 // psutil's cached Process gives it; 0 the first time.
@@ -270,10 +271,13 @@ impl Exporter {
                 });
                 json!({
                     "pid": pid,
+                    "gpu": index,
                     "user": p.as_ref().and_then(|p| p.uid).map(os::user_name),
                     "cmd": p.as_ref().map(|p| p.name.clone()),
                     "gpu_mem": mem,
                     "cpu_pct": cpu,
+                    "ppid": p.as_ref().map(|p| p.ppid),
+                    "port": p.as_ref().and_then(|p| served_port_cached(p.pid, p.start_ticks)),
                 })
             })
             .collect();
