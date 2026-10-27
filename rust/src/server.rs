@@ -83,7 +83,7 @@ fn percent_decode(s: &str) -> String {
     while i < b.len() {
         match b[i] {
             b'+' => out.push(b' '),
-            b'%' if i + 2 < b.len() + 0 && i + 2 <= b.len() - 1 => {
+            b'%' if i + 2 < b.len() => {
                 match u8::from_str_radix(&s[i + 1..i + 3], 16) {
                     Ok(v) => {
                         out.push(v);

@@ -1,6 +1,43 @@
 # Scope: porting vitals to Rust
 
-Status: scoped 2026-10-26, not started. Decide against the numbers below.
+Status: **done 2026-10-27** (branch `rust-port`). `rust/` is at parity with the Python reference
+on the VM, Sparky and CT 124: `scripts/compare.py` finds no differences, and the API suite passes
+against the binary on all three. Not deployed yet. The scope as written on 2026-10-26 follows the
+results.
+
+## Results
+
+Serving a 1 Hz stream, whole process:
+
+| Host | Rust: CPU per sample | Rust: peak RSS | Python: CPU per sample | Python: peak RSS |
+|---|---|---|---|---|
+| the VM (no GPU) | 7.5 ms | 4 MB | 11.5 ms | 27 MB |
+| Sparky (GB10) | 8.5 ms | 35 MB | 10.0 ms | 63 MB |
+| CT 124 (RTX 5000) | 50.5 ms | 30 MB | 56.0 ms | 52 MB |
+
+- **CPU** came out as predicted: −10 to −35%. The rest is kernel and NVIDIA driver time.
+- **Memory** is lower than Python's, but not the ~5–8 MB predicted on GPU hosts. The binary
+  alone is 4 MB; loading NVML adds ~20 MB of `libnvidia-ml`/`libcuda` allocations, which every
+  NVML client carries.
+- **Size:** 1.9 MB (x86_64) and 1.6 MB (aarch64), built from the VM with `cargo zigbuild` against
+  glibc 2.41.
+
+What the port changed or found on the way:
+
+- **NVML** goes through `nvml-wrapper-sys`'s raw bindings, not the safe wrapper. The calls are the
+  ones pynvml makes, so outputs match one for one. A function the driver lacks is a missing
+  symbol, not a panic. No typed enum can reject a value the crate does not know.
+- **Field-ID drift:** the bindings' header numbers the clocks-event thermal and power-brake
+  fields 251–253. Current NVML numbers them 269–271, and a 615 driver answers only those. Found
+  by the diff on both GPU hosts.
+- **Physical cores in a container:** psutil counts every core of the machine (48 in CT 124, which
+  has 24 threads). Both implementations now count the cores among the CPUs the host or container
+  has (20).
+- **psutil, replaced:** `/proc/stat` CPU times, `/proc/self/mounts` with getmntent's unescaping,
+  `/proc/diskstats` in 512-byte sectors, `/proc/<pid>/stat` with psutil's state names and name
+  fix, `getifaddrs`, and utmp, with no utmp counting as 0 users as psutil does.
+- **NVIDIA's own Rust** (`NVIDIA/cuda-rust`, early research) covers the CUDA driver, runtime and
+  kernels, not NVML. Nothing NVIDIA publishes covers monitoring.
 
 ## Why, and why not
 

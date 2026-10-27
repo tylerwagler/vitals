@@ -79,7 +79,9 @@ fn cpuinfo() -> (Option<String>, Vec<String>) {
     (model, flags)
 }
 
-/// Physical cores, as psutil counts them: distinct core sibling sets.
+/// Physical cores: distinct core sibling sets among the CPUs this host (or
+/// container) has. Not psutil's count, which is every core of the machine:
+/// in a container given 24 of 96 threads it says 48.
 fn physical_cores(online: &[i64]) -> Option<i64> {
     let mut sets = BTreeSet::new();
     for n in online {

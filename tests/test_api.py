@@ -277,6 +277,6 @@ def test_metrics_json_has_the_reference_fields_this_host_has(srv, path):
         pytest.skip("this GPU reports no clock state")
     if path == ("gpus", 0, "clock_event_seconds") and not mine:
         pytest.skip("this GPU has no clocks-event counters")
-    if path == ("rdma", 0, "hw_counters") and not mine:
-        pytest.skip("this port has no hw counters")
+    if path in (("rdma", 0, "hw_counters"), ("rdma", 0, "errors")) and not mine:
+        pytest.skip("this port has no counters")  # a down port seen from a container has none
     assert keys(ref, *path) <= mine

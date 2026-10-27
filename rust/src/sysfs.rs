@@ -141,7 +141,7 @@ pub fn list(dir: impl AsRef<Path>, keep: impl Fn(&str) -> bool) -> Vec<PathBuf> 
 /// Like list, ordered by natural_key of the basename.
 pub fn list_natural(dir: impl AsRef<Path>, keep: impl Fn(&str) -> bool) -> Vec<PathBuf> {
     let mut out = list(dir, keep);
-    out.sort_by(|a, b| natural_key(&basename(a)).cmp(&natural_key(&basename(b))));
+    out.sort_by_key(|a| natural_key(&basename(a)));
     out
 }
 

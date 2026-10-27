@@ -40,12 +40,14 @@ const REASON_BITS: &[(u64, &str)] = &[
 pub const PROBLEM_BITS: u64 = 0x004 | 0x008 | 0x020 | 0x040 | 0x080;
 
 // The cumulative clocks-event counters, in nanoseconds, by NVML field id
-// (nvml.h's NVML_FI_DEV_CLOCKS_EVENT_REASON_*).
+// (nvml.h's NVML_FI_DEV_CLOCKS_EVENT_REASON_*). The thermal and power-brake
+// ids are current NVML's (pynvml 13.615: 269-271); nvml-wrapper-sys 0.10's
+// header has them as 251-253, which a 615 driver does not answer.
 pub const EVENT_FIELDS: &[(&str, u32)] = &[
     ("sw_power_cap", 74),
-    ("sw_thermal_slowdown", 251),
-    ("hw_thermal_slowdown", 252),
-    ("hw_power_brake_slowdown", 253),
+    ("sw_thermal_slowdown", 269),
+    ("hw_thermal_slowdown", 270),
+    ("hw_power_brake_slowdown", 271),
     ("sync_boost", 76),
 ];
 const CLOCKS: &[(&str, u32)] = &[("graphics", 0), ("sm", 1), ("memory", 2), ("video", 3)];

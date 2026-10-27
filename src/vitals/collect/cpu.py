@@ -69,6 +69,18 @@ def _cpuinfo() -> tuple[str | None, list[str]]:
     return model, flags
 
 
+def physical_cores(online: list[int]) -> int | None:
+    """Distinct core sibling sets among the CPUs this host (or container) has.
+
+    Not psutil.cpu_count(logical=False): that counts every core of the
+    machine, so in a container given 24 of 96 threads it says 48.
+    """
+    sets = {read_text(f"{CPU_DIR}/cpu{n}/topology/core_cpus_list")
+            or read_text(f"{CPU_DIR}/cpu{n}/topology/thread_siblings_list") for n in online}
+    sets.discard(None)
+    return len(sets) or None
+
+
 def static() -> dict[str, Any]:
     online = cpu_list(read_text(f"{CPU_DIR}/online"))
     rows = {int(r["cpu"]): r for r in _lscpu_cpus() if "cpu" in r}
@@ -97,7 +109,7 @@ def static() -> dict[str, Any]:
     return {
         "model": model_name or (next(iter(clusters))[0] if clusters else None),
         "logical_cpus": psutil.cpu_count(),
-        "physical_cores": psutil.cpu_count(logical=False),
+        "physical_cores": physical_cores(online),
         "sockets": len(packages - {None}) or None,
         "online": online,
         "isolated": cpu_list(read_text(f"{CPU_DIR}/isolated")),

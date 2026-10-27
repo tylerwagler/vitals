@@ -12,12 +12,12 @@
 # exporter's parent, so a dead exporter is reaped here rather than left for
 # a PID 1 that never expected children.
 
-EXPORTER=/opt/vitals/vitals.pyz
+EXPORTER=/opt/vitals/vitals
 
 (
     while :; do
         setpriv --reuid=nobody --regid=nogroup --clear-groups --no-new-privs \
-            /usr/bin/python3 "$EXPORTER" --port "${VITALS_PORT:-9420}" </dev/null
+            "$EXPORTER" --port "${VITALS_PORT:-9420}" </dev/null
         echo "vitals exited ($?); restarting in 15 s" >&2
         sleep 15
     done

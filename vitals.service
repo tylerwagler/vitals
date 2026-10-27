@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /opt/vitals/vitals.pyz --port 9420
+ExecStart=/opt/vitals/vitals --port 9420
 Restart=on-failure
 RestartSec=2
 

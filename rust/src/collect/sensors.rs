@@ -35,10 +35,9 @@ fn unit(kind: &str) -> (&'static str, f64) {
 fn sensor_file(name: &str) -> Option<(&'static str, String, &'static str)> {
     let (stem, suffix) = if let Some(s) = name.strip_suffix("_input") {
         (s, "input")
-    } else if let Some(s) = name.strip_suffix("_average") {
-        (s, "average")
     } else {
-        return None;
+        let s = name.strip_suffix("_average")?;
+        (s, "average")
     };
     for kind in KINDS {
         if let Some(n) = stem.strip_prefix(kind) {

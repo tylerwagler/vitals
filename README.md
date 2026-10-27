@@ -7,16 +7,22 @@ RAM, pressure, GPUs, temperatures, fans, power, disk usage and I/O, network,
 RDMA), as request/reply or as a Server-Sent Events stream.
 
 ```sh
-python3 vitals.pyz                       # serve on 0.0.0.0:9420
-python3 vitals.pyz --once                # print static + live and exit (also: static, live, processes, metrics)
+vitals                       # serve on 0.0.0.0:9420
+vitals --once                # print static + live and exit (also: static, live, processes, metrics)
 curl -s localhost:9420/v1/static | jq .host.machine
 curl -s localhost:9420/v1/live/gpus | jq '.gpus[0].power'
 curl -sN 'localhost:9420/v1/stream?interval=1&sections=cpu,memory'
 ```
 
-It needs `psutil` and, for GPUs, `nvidia-ml-py` (imported as `pynvml`), and
-nothing else. Without NVML it still reports everything else, with no GPUs.
-pulsar-gui's cluster view polls `/metrics.json`, which keeps its old shape.
+`vitals` is one Rust binary per architecture (`rust/`), about 2 MB, needing
+glibc 2.41 or later and nothing else. GPUs need the NVIDIA driver, whose
+`libnvidia-ml.so.1` it loads at runtime; without it, everything else is
+still reported, with no GPUs. pulsar-gui's cluster view polls
+`/metrics.json`, which keeps its old shape.
+
+The Python package (`src/vitals/`, built as `dist/vitals.pyz`) is the
+reference implementation: the Rust one is held to it by the same API test
+suite and a side-by-side diff (see *Tests*), and it is the rollback.
 
 ## The API
 
@@ -88,7 +94,7 @@ by requests within 250 ms, or within one interval while a stream runs).
 | Section | Contents |
 |---|---|
 | `host` | hostname; **machine type** (`bare-metal` / `vm` / `lxc` / `container`) with hypervisor and container tech; OS (os-release, DGX release, Proxmox version); kernel release, version, arch, cmdline, taint; DMI firmware (vendor, product, board, BIOS); boot time; timezone |
-| `exporter` | vitals version, Python, psutil and nvidia-ml-py versions, NVML state, pid, user, listen address |
+| `exporter` | vitals version and implementation (`rust`, or the Python reference with its Python, psutil and nvidia-ml-py versions), NVML state, pid, user, listen address |
 | `cpu` | model, logical and physical counts, sockets, clusters (model and min/max MHz per CPU group, so hybrid parts show both), caches, NUMA nodes, SMT, isolated CPUs, governor, frequency driver, EPP, boost, flags, vulnerabilities |
 | `memory` | total, swap, swap devices, huge page sizes, THP mode, swappiness, overcommit, min_free, zswap, KSM |
 | `gpus` | driver, CUDA and NVML versions; per card: name, UUID, serial, board part, brand, architecture, compute capability, cores, VBIOS, InfoROM, PCI ids and max link, memory size and bus width, max clocks, power limits (default, min, max, enforced), temperature thresholds, persistence/compute/ECC/MIG modes, fans, NVLink links and their peers; pairwise topology and P2P |
@@ -124,29 +130,39 @@ clocks-event reasons (about 25 ms of driver CPU on an idle Turing card) are
 asked at most once a second. PCIe throughput (20 ms per call by design),
 encoder/decoder, the other clocks, energy, event counters, ECC and fans are
 asked every 5 s (`slow_readings_age_s` says how old). hwmon labels are cached
-for a minute, and cooling devices for 10 s. At 1 Hz, the whole process costs
-about 57 ms of CPU per sample on CT 124 (one RTX 5000, 5.7% of a core) and
-10 ms on Sparky (1%). Nothing runs while nobody listens. `docs/rust-port.md`
-scopes a native rewrite.
+for a minute, and cooling devices for 10 s. Nothing runs while nobody listens.
+
+Measured serving a 1 Hz stream, whole process, Rust against the Python reference:
+
+| Host | Rust: CPU per sample | Rust: peak memory | Python: CPU per sample | Python: peak memory |
+|---|---|---|---|---|
+| the VM (no GPU) | 7.5 ms (0.7% of a core) | 4 MB | 11.5 ms | 27 MB |
+| Sparky (GB10) | 8.5 ms (0.8%) | 35 MB | 10.0 ms | 63 MB |
+| CT 124 (RTX 5000) | 50.5 ms (5.1%) | 30 MB | 56.0 ms | 52 MB |
+
+With a GPU, most of the CPU is the NVIDIA driver's own, and ~20 MB of the
+memory is `libnvidia-ml`'s and `libcuda`'s allocations. Any client of NVML
+pays both, whatever language it is in. `docs/rust-port.md` has the reasoning.
 
 ## Build
 
-The source is a package under `src/vitals/` (one collector module per
-subsystem under `collect/`). It deploys as a single zipapp:
-
 ```sh
-make pyz        # -> dist/vitals.pyz, runs with any python3 >= 3.11
+make rust       # -> dist/vitals-x86_64, dist/vitals-aarch64 (glibc >= 2.41)
+make pyz        # -> dist/vitals.pyz, the Python reference (python3 >= 3.11)
 ```
 
-A `pynvml.py` copied next to `vitals.pyz` is importable, for containers
-without `nvidia-ml-py`.
+The Rust builds cross-compile from any x86_64 host with `cargo-zigbuild`
+(`cargo install cargo-zigbuild`) and a zig (`uv tool install ziglang`, found
+as `python-zig`), pinned to glibc 2.41 so one binary runs on Debian 13,
+Ubuntu 24.04+ and DGX OS. In `rust/`, a plain `cargo build --release` builds
+for the machine it runs on.
 
 ## Install as a service
 
 ```sh
-make pyz
+make rust
 sudo useradd --system --no-create-home --shell /usr/sbin/nologin vitals
-sudo install -D -m 0644 dist/vitals.pyz /opt/vitals/vitals.pyz
+sudo install -D -m 0755 dist/vitals-$(uname -m) /opt/vitals/vitals
 sudo install -m 0644 vitals.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now vitals
 curl -s localhost:9420/health
@@ -160,6 +176,10 @@ firmware query per sysfs file. NFS and other network mounts get a 0.5 s
 timeout on `statvfs` and are reported `"responsive": false` instead of
 hanging a sample.
 
+The rollback is the Python build: install `dist/vitals.pyz` instead and set
+`ExecStart=/usr/bin/python3 /opt/vitals/vitals.pyz --port 9420` (it needs
+`python3-psutil`, and `nvidia-ml-py` or a `pynvml.py` beside it for GPUs).
+
 ### In a Proxmox app container
 
 An OCI app container runs its workload as PID 1, so nothing inside it keeps
@@ -169,8 +189,7 @@ the host: set it as the container's entrypoint, and it starts the exporter
 PID 1. Its arguments are the workload; with none it runs `/app/llama-server`.
 
 ```sh
-# in the container: python3-psutil, and in /opt/vitals
-# vitals.pyz, pynvml.py and entrypoint.sh (0755)
+# in the container, in /opt/vitals: vitals (the binary) and entrypoint.sh, both 0755
 # on the host, then restart the container
 pct set 130 --entrypoint /opt/vitals/entrypoint.sh
 ```
@@ -179,18 +198,18 @@ If the container's entrypoint must stay as it is,
 `contrib/vitals-pct@.service` supervises the exporter from the host instead,
 with `pct exec`. It still runs in the container's namespaces, so it answers
 on the container's address and reports the container's hostname, memory and
-GPU processes. The container needs `python3-psutil` and the two files.
-`pynvml.py` is a single pure-Python file and can be copied from any
-`nvidia-ml-py` install.
+GPU processes. The container needs only the binary.
 
 ```sh
-# in the container
-apt-get install -y --no-install-recommends python3-psutil
-mkdir -p /opt/vitals   # + vitals.pyz, pynvml.py
+# in the container: /opt/vitals/vitals
 # on the host
 install -m 0644 contrib/vitals-pct@.service /etc/systemd/system/
 systemctl daemon-reload && systemctl enable --now vitals-pct@130
 ```
+
+A container whose NVIDIA libraries are bind-mounted from the host (CT 124,
+CT 131) needs `LD_LIBRARY_PATH=/usr/local/nvidia/lib64` in the unit, as
+before, so the binary finds `libnvidia-ml.so.1`.
 
 In a container, only the GPU and the container's own view (memory,
 processes, filesystems) are specific to it. hwmon, thermal zones, PCI and
@@ -220,14 +239,27 @@ python3 -m venv .venv
 .venv/bin/pip install psutil pytest nvidia-ml-py httpx fastapi -e ../../pulsar/tui
 .venv/bin/pip install --no-deps -e ../../pulsar/gui   # its pyproject pins pulsar-tui by path
 .venv/bin/pip install --no-deps -e .
-.venv/bin/python -m pytest -q
+make test PYTHON=.venv/bin/python
 ```
 
-`test_collect.py` runs the collectors on fake `/sys` trees and a fake NVML,
-`test_api.py` runs a real server on a free port (endpoints, the stream, its
-cap and intervals), and `test_legacy.py` holds `/metrics.json` to the
-reference shape and runs it through pulsar-gui's own cluster poller (skipped
-unless `pulsar_gui` is importable).
+`make test` runs, in order:
+
+- **Rust unit tests** (`cargo test`).
+- **The Python suite.** `test_collect.py` runs the collectors on fake `/sys`
+  trees and a fake NVML. `test_legacy.py` holds `/metrics.json` to the
+  reference shape and runs it through pulsar-gui's own cluster poller
+  (skipped unless `pulsar_gui` is importable).
+- **`test_api.py` against the Rust binary.** It is black-box: by default it
+  runs the in-process Python server, and with `VITALS_BIN=<command>` it starts
+  that build on a free port and runs the same tests (endpoints, the stream,
+  its cap and intervals, the reference fields of `/metrics.json`). This suite
+  is the contract.
+- **`scripts/compare.py`**, which runs both builds side by side and diffs
+  them. Static values must be equal; for live readings, the keys and which
+  readings are present must match.
+
+Sections a host lacks (GPU, spbm, RDMA) are skipped there. Run the suite and
+the diff on a GPU host too: Sparky and CT 124 both pass with no differences.
 
 ## Credit
 
