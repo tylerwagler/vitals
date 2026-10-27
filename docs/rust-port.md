@@ -39,7 +39,7 @@ Same API, same JSON, same behaviour. The contract is the existing Python test su
 | Python module | Rust module | Notes |
 |---|---|---|
 | `sysfs.py` | `sysfs.rs` | `read_text`/`read_int`/`scaled`, `cpu_list`, `bracketed`; std only |
-| `rates.rs` | `rates.rs` | Same semantics: no rate on first sight or a reset |
+| `rates.py` | `rates.rs` | Same semantics: no rate on first sight or a reset |
 | `collect/host.py` | `collect/host.rs` | machine type (systemd-detect-virt, lxcfs, DMI), os-release, DMI, systemd TTL probe |
 | `collect/cpu.py` | `collect/cpu.rs` | `/proc/stat` per-CPU times parsed directly (psutil's `cpu_times`), lscpu JSON, throttle TTL |
 | `collect/memory.py` | `collect/memory.rs` | meminfo, vmstat, PSI: plain parsing |
