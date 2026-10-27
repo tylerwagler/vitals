@@ -11,16 +11,39 @@ from pathlib import Path
 
 
 def read_text(path: str | Path) -> str | None:
+    """A file's stripped text, or None.
+
+    Plain os.open/os.read: a sample reads hundreds of sysfs files, and
+    pathlib's and TextIOWrapper's layers were most of the exporter's own CPU.
+    """
     try:
-        return Path(path).read_text().strip()
-    except (OSError, UnicodeDecodeError):
+        fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC)
+    except OSError:
+        return None
+    try:
+        chunks = []
+        while True:
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+    try:
+        return b"".join(chunks).decode().strip()
+    except UnicodeDecodeError:
         return None
 
 
 def read_int(path: str | Path) -> int | None:
     text = read_text(path)
     try:
-        return int(text, 0) if text is not None else None
+        if text is None:
+            return None
+        # decimal, as sysfs writes nearly everything ("08" too); hex only when it says so
+        return int(text, 16) if text[:2].lower() == "0x" else int(text)
     except ValueError:
         return None
 

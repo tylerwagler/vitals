@@ -102,21 +102,39 @@ def iface_static() -> list[dict[str, Any]]:
     return out
 
 
+# /proc/net/dev's sixteen columns, receive then transmit.
+PROC_NET_DEV = ("rx_bytes", "rx_packets", "rx_errors", "rx_dropped", "rx_fifo", "rx_frame",
+                "rx_compressed", "multicast", "tx_bytes", "tx_packets", "tx_errors",
+                "tx_dropped", "tx_fifo", "collisions", "tx_carrier", "tx_compressed")
+RATED = ("rx_bytes", "tx_bytes", "rx_packets", "tx_packets",
+         "rx_errors", "tx_errors", "rx_dropped", "tx_dropped")
+
+
+def proc_net_dev(text: str | None = None) -> dict[str, dict[str, int]]:
+    """Every interface's counters from one file, instead of ten sysfs files each."""
+    out = {}
+    for line in (text if text is not None else read_text("/proc/net/dev") or "").splitlines()[2:]:
+        name, _, rest = line.partition(":")
+        fields = rest.split()
+        if len(fields) >= len(PROC_NET_DEV):
+            out[name.strip()] = dict(zip(PROC_NET_DEV, (int(f) for f in fields)))
+    return out
+
+
 def iface_live(rates: Rates) -> list[dict[str, Any]]:
+    counters = proc_net_dev()
     out = []
     for path in interfaces():
         name = os.path.basename(path)
-        stats = f"{path}/statistics"
         row: dict[str, Any] = {
             "iface": name,
             "state": (read_text(f"{path}/operstate") or "unknown").upper(),
-            "carrier": read_int(f"{path}/carrier"),
         }
+        stats = counters.get(name, {})
         for c in NET_COUNTERS:
-            value = read_int(f"{stats}/{c}")
+            value = stats.get(c)
             row[c] = value
-            if c in ("rx_bytes", "tx_bytes", "rx_packets", "tx_packets",
-                     "rx_errors", "tx_errors", "rx_dropped", "tx_dropped"):
+            if c in RATED:
                 row[f"{c}_per_s"] = rates.rate(f"net/{name}/{c}", value, 1)
         rx, tx = row.get("rx_bytes_per_s"), row.get("tx_bytes_per_s")
         row["rx_bits_per_s"] = None if rx is None else rx * 8

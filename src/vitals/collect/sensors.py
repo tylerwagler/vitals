@@ -6,6 +6,8 @@ from __future__ import annotations
 import glob
 import os
 import re
+import threading
+import time
 from typing import Any
 
 from ..sysfs import link_name, natural_key, read_int, read_text, scaled
@@ -43,20 +45,49 @@ def hwmon_chips(root: str = HWMON_ROOT) -> list[str]:
     return sorted(glob.glob(os.path.join(root, "hwmon*")), key=natural_key)
 
 
-def hwmon_live(root: str = HWMON_ROOT) -> list[dict[str, Any]]:
+class HwmonLayout:
+    """Which sensors each chip has, their labels and alarm files, re-read once
+    a minute. A sample then opens only the value files: labels are half the
+    files and never change."""
+
+    TTL_S = 60.0
+
+    def __init__(self, root: str = HWMON_ROOT) -> None:
+        self.root = root
+        self._at = -self.TTL_S
+        self._chips: list[tuple[str, str | None, list[tuple[str, str, str, str, str | None]]]] = []
+        self._lock = threading.Lock()
+
+    def get(self) -> list[tuple[str, str | None, list[tuple[str, str, str, str, str | None]]]]:
+        with self._lock:
+            now = time.monotonic()
+            if now - self._at >= self.TTL_S:
+                self._at = now
+                chips = []
+                for hw in hwmon_chips(self.root):
+                    sensors = []
+                    for kind, prefix, path in _channels(hw):
+                        alarm = f"{hw}/{prefix}_alarm"
+                        sensors.append((kind, prefix, path, read_text(f"{hw}/{prefix}_label") or prefix,
+                                        alarm if os.path.exists(alarm) else None))
+                    chips.append((os.path.basename(hw), read_text(f"{hw}/name"), sensors))
+                self._chips = chips
+            return self._chips
+
+
+def hwmon_live(root: str = HWMON_ROOT, layout: HwmonLayout | None = None) -> list[dict[str, Any]]:
     out = []
-    for hw in hwmon_chips(root):
-        chip = read_text(f"{hw}/name")
-        for kind, prefix, path in _channels(hw):
+    for name, chip, channels in (layout or HwmonLayout(root)).get():
+        for kind, _prefix, path, label, alarm_path in channels:
             unit, scale = UNITS[kind]
             row: dict[str, Any] = {
-                "hwmon": os.path.basename(hw), "chip": chip,
-                "sensor": read_text(f"{hw}/{prefix}_label") or prefix,
+                "hwmon": name, "chip": chip, "sensor": label,
                 "kind": kind, "value": scaled(path, scale, 3), "unit": unit,
             }
-            alarm = read_int(f"{hw}/{prefix}_alarm")
-            if alarm is not None:
-                row["alarm"] = bool(alarm)
+            if alarm_path is not None:
+                alarm = read_int(alarm_path)
+                if alarm is not None:
+                    row["alarm"] = bool(alarm)
             out.append(row)
     return out
 
@@ -97,6 +128,24 @@ def thermal_static(root: str = THERMAL_ROOT) -> list[dict[str, Any]]:
         out.append({"zone": os.path.basename(z), "type": read_text(f"{z}/type"),
                     "policy": read_text(f"{z}/policy"), "trip_points": trips})
     return out
+
+
+class CoolingDevices:
+    """Cooling device states every 10 s: on ACPI hosts each cur_state read
+    can be a firmware call, and a host has one per CPU."""
+
+    TTL_S = 10.0
+
+    def __init__(self) -> None:
+        self._at = -self.TTL_S
+        self._value: list[dict[str, Any]] = []
+
+    def get(self) -> list[dict[str, Any]]:
+        now = time.monotonic()
+        if now - self._at >= self.TTL_S:
+            self._at = now
+            self._value = cooling_devices()
+        return self._value
 
 
 def cooling_devices(root: str = THERMAL_ROOT) -> list[dict[str, Any]]:
@@ -173,12 +222,12 @@ def static() -> dict[str, Any]:
     return {"hwmon": hwmon_static(), "thermal_zones": thermal_static()}
 
 
-def live(hwmon: list[dict[str, Any]], spbm: Spbm) -> dict[str, Any]:
+def live(hwmon: list[dict[str, Any]], spbm: Spbm, cooling: CoolingDevices | None = None) -> dict[str, Any]:
     temps = [s["value"] for s in hwmon if s["kind"] == "temp" and s["value"] is not None]
     return {
         "hottest_celsius": max(temps) if temps else None,
         "hwmon": hwmon,
         "thermal_zones": thermal_zones(),
-        "cooling_devices": cooling_devices(),
+        "cooling_devices": cooling.get() if cooling is not None else cooling_devices(),
         "spbm": spbm.collect(),
     }

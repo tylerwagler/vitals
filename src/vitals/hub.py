@@ -80,6 +80,8 @@ class Hub:
         self.systemd = host.Systemd()
         self.cpu_throttle = cpu.ThrottleCounts()
         self.spbm = sensors.Spbm()
+        self.hwmon_layout = sensors.HwmonLayout()
+        self.cooling = sensors.CoolingDevices()
         self.statvfs = storage.Statvfs()
         self.processes = processes.Processes()
         self.rates = Rates()
@@ -127,7 +129,7 @@ class Hub:
             started = time.perf_counter()
             rates = self.rates
             rates.begin(time.monotonic())
-            hw = self._safe("sensors.hwmon", sensors.hwmon_live)
+            hw = self._safe("sensors.hwmon", lambda: sensors.hwmon_live(layout=self.hwmon_layout))
             hw = hw if isinstance(hw, list) else []
             mem = self._safe("memory", lambda: memory.live(rates))
             vm = SimpleNamespace(total=mem.get("total_bytes") or 0, available=mem.get("available_bytes") or 0)
@@ -142,7 +144,7 @@ class Hub:
                 "memory": mem,
                 "pressure": self._safe("pressure", lambda: memory.pressure(rates)),
                 "gpus": self._safe("gpus", lambda: gpu.live(self.nv, rates, vm, self.clock_cap, self.gpu_procs)),
-                "sensors": self._safe("sensors", lambda: sensors.live(hw, self.spbm)),
+                "sensors": self._safe("sensors", lambda: sensors.live(hw, self.spbm, self.cooling)),
                 "storage": self._safe("storage", lambda: storage.live(rates, self.statvfs)),
                 "network": self._safe("network", lambda: network.live(rates)),
                 "rdma": self._safe("rdma", lambda: network.rdma_live(rates)),

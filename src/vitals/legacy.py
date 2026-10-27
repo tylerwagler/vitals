@@ -24,7 +24,7 @@ from typing import Any
 import psutil
 
 from . import __version__
-from .collect.gpu import CLOCK_THRESHOLD_MHZ, EVENT_FIELDS, PROBLEM_BITS, ClockCap, Nvml, clock_status, decode_reasons, gpu_memory
+from .collect.gpu import CLOCK_THRESHOLD_MHZ, EVENT_FIELDS, PROBLEM_BITS, ClockCap, Nvml, clock_status, decode_reasons, gpu_memory, reasons
 from .collect.memory import psi_level
 from .collect.network import rdma, rdma_netlink_counters
 from .collect.sensors import Spbm
@@ -71,19 +71,19 @@ class Gpus:
             "is_uma": uma,
             "memory_total_bytes": mem_total,
             "memory_used_bytes": mem_used,
-            "throttle": self._throttle(h, util_pct),
+            "throttle": self._throttle(index, h, util_pct),
             "identity": self._identity(h),
             "clock_event_seconds": self._events(h),
             "clock_cap": clock_cap,
         }
         return gpu, self._processes(h)
 
-    def _throttle(self, h: Any, util_pct: int | None) -> dict[str, Any]:
+    def _throttle(self, index: int, h: Any, util_pct: int | None) -> dict[str, Any]:
         call, nv = self.nv.call, self.nv
         clk = call("nvmlDeviceGetClockInfo", h, nv.const("NVML_CLOCK_GRAPHICS"))
         clk_max = call("nvmlDeviceGetMaxClockInfo", h, nv.const("NVML_CLOCK_GRAPHICS"))
         pstate_no = call("nvmlDeviceGetPerformanceState", h)
-        raw = call("nvmlDeviceGetCurrentClocksEventReasons", h)
+        raw = reasons(self.nv, index, h)  # shared with /v1, at most once a second
         if clk is None or clk_max is None or pstate_no is None or raw is None:
             return {"available": False}
         pstate = f"P{pstate_no}"

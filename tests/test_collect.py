@@ -286,18 +286,42 @@ def test_gpu_static_on_uma_uses_the_host_memory():
     assert d["is_uma"] and d["memory_total_bytes"] == 128 << 30
 
 
-def test_gpu_live_from_nvml():
+class Clock:
+    def __init__(self, t: float = 1000.0) -> None:
+        self.t = t
+
+    def monotonic(self) -> float:
+        return self.t
+
+
+def test_gpu_live_from_nvml(monkeypatch):
+    clock = Clock()
+    monkeypatch.setattr(gpu, "time", clock)
     nv, r = nvml_with(fake_nvml()), Rates()
     vm = NS(total=64 << 30, available=60 << 30)
     r.begin(0.0)
-    gpu.live(nv, r, vm, gpu.ClockCap(), gpu.GpuProcesses())
+    first = gpu.live(nv, r, vm, gpu.ClockCap(), gpu.GpuProcesses())[0]
     r.end()
-    nv.lib.nvmlDeviceGetTotalEnergyConsumption = lambda h: 1_125_000  # +125 J in 1 s
+    assert first["slow_readings_age_s"] == 0.0 and first["power"]["average_watts"] is None
+
+    # Within the slow tier's TTL the energy counter is not asked again: its
+    # reading, and its (absent) rate, are reused, and the sample says how old.
+    nv.lib.nvmlDeviceGetTotalEnergyConsumption = lambda h: 1_125_000
+    clock.t += 1.0
     r.begin(1.0)
+    g = gpu.live(nv, r, vm, gpu.ClockCap(), gpu.GpuProcesses())[0]
+    r.end()
+    assert g["power"]["energy_joules"] == 1000.0 and g["slow_readings_age_s"] == 1.0
+
+    # Past it, energy is read again and its rate is over its own 5 s window.
+    nv.lib.nvmlDeviceGetTotalEnergyConsumption = lambda h: 1_625_000  # +625 J in 5 s
+    clock.t += 4.0
+    r.begin(5.0)
     g = gpu.live(nv, r, vm, gpu.ClockCap(), gpu.GpuProcesses())[0]
     assert g["utilization"] == {"gpu_percent": 90, "memory_percent": 40, "encoder_percent": 3, "decoder_percent": None}
     assert g["memory"]["used_percent"] == 25.0
-    assert g["power"] == {"draw_watts": 124.5, "limit_watts": 125.0, "energy_joules": 1125.0, "average_watts": 125.0}
+    assert g["power"] == {"draw_watts": 124.5, "limit_watts": 125.0, "energy_joules": 1625.0, "average_watts": 125.0}
+    assert g["slow_readings_age_s"] == 0.0
     assert g["clocks_mhz"] == {"graphics": 1200, "sm": 1200, "memory": 7000, "video": 1100}
     assert g["throttle"]["status"] == "THROTTLED" and g["throttle"]["reasons"] == ["SW_POWER_CAP"]
     assert g["pcie"]["tx_bytes_per_s"] == 100 * 1024
@@ -305,6 +329,39 @@ def test_gpu_live_from_nvml():
     assert g["ecc_errors"] is None
     [p] = g["processes"]
     assert p["pid"] == os.getpid() and p["type"] == "compute" and p["name"] and p["gpu_memory_bytes"] == 1 << 30
+
+
+def test_reasons_are_asked_at_most_once_a_second(monkeypatch):
+    clock = Clock()
+    monkeypatch.setattr(gpu, "time", clock)
+    lib = fake_nvml()
+    calls = []
+    lib.nvmlDeviceGetCurrentClocksEventReasons = lambda h: calls.append(h) or 0x004
+    nv = nvml_with(lib)
+    for _ in range(3):
+        assert gpu.reasons(nv, 0, "h0") == 0x004
+    clock.t += 1.0
+    gpu.reasons(nv, 0, "h0")
+    assert len(calls) == 2
+
+
+def test_proc_net_dev_reads_every_interface_from_one_file():
+    from vitals.collect import network
+    text = ("Inter-|   Receive |  Transmit\n face |bytes packets errs drop fifo frame compressed multicast|...\n"
+            "  eth0: 1000 10 1 2 0 0 0 3 2000 20 4 5 0 6 0 0\n    lo: 5 1 0 0 0 0 0 0 5 1 0 0 0 0 0 0\n")
+    out = network.proc_net_dev(text)
+    assert out["eth0"]["rx_bytes"] == 1000 and out["eth0"]["tx_bytes"] == 2000
+    assert out["eth0"]["multicast"] == 3 and out["eth0"]["collisions"] == 6 and out["eth0"]["tx_dropped"] == 5
+    assert set(out) == {"eth0", "lo"}
+
+
+def test_read_int_is_decimal_unless_it_says_hex(tmp_path):
+    from vitals.sysfs import read_int
+    (tmp_path / "a").write_text("08\n")
+    (tmp_path / "b").write_text("0x10de\n")
+    (tmp_path / "c").write_text("-5\n")
+    assert [read_int(tmp_path / n) for n in "abc"] == [8, 0x10DE, -5]
+    assert read_int(tmp_path / "missing") is None
 
 
 def test_reasons_use_nvml_bits():

@@ -186,6 +186,36 @@ class Nvml:
         self.error: str | None = None
         self._tried = -self.RETRY_S
         self._lock = threading.Lock()
+        self._memo: dict[str, tuple[float, Any]] = {}
+        self._windows: dict[str, tuple[float, float, float | None]] = {}
+
+    def memo(self, key: str, ttl: float, fn: Any) -> tuple[Any, float]:
+        """fn()'s value, asked at most every ttl seconds: (value, age_s)."""
+        now = time.monotonic()
+        hit = self._memo.get(key)
+        if hit is not None and now - hit[0] < ttl:
+            return hit[1], now - hit[0]
+        value = fn()
+        self._memo[key] = (now, value)
+        return value, 0.0
+
+    def window_rate(self, key: str, value: Any, fresh: bool) -> float | None:
+        """Per-second rate of a memoized counter over its own read interval.
+
+        A reused reading keeps the rate of the last real one, rather than
+        reading as a zero change against the sample's interval.
+        """
+        if not isinstance(value, (int, float)):
+            return None
+        now = time.monotonic()
+        prev = self._windows.get(key)
+        if not fresh:
+            return prev[2] if prev else None
+        rate = None
+        if prev is not None and value >= prev[1] and now > prev[0]:
+            rate = (value - prev[1]) / (now - prev[0])
+        self._windows[key] = (now, value, rate)
+        return rate
 
     def init(self) -> bool:
         if self.ready:
@@ -408,47 +438,25 @@ def _events(nv: Nvml, h: Any) -> dict[str, float]:
 _max_clock: dict[str, Any] = {}
 
 
-def device_live(nv: Nvml, index: int, h: Any, rates: Rates, vm: Any,
-                clock_cap: dict[str, Any] | None, procs: GpuProcesses) -> dict[str, Any]:
+# How often the costly or slow-moving readings are asked, whatever the
+# sample interval. Measured on an idle RTX 5000: the clocks-event reasons are
+# ~25 ms of CPU, each PCIe throughput call samples for 20 ms, energy and each
+# clock ~5-9 ms; utilization, memory, temperature and power are well under 1.
+REASONS_TTL_S = 1.0
+SLOW_TTL_S = 5.0
+
+
+def reasons(nv: Nvml, index: int, h: Any) -> Any:
+    """The clocks-event reason bits, shared with /metrics.json, at most once a second."""
+    def ask() -> Any:
+        raw = nv.call("nvmlDeviceGetCurrentClocksEventReasons", h)
+        return raw if raw is not None else nv.call("nvmlDeviceGetCurrentClocksThrottleReasons", h)
+    return nv.memo(f"{index}/reasons", REASONS_TTL_S, ask)[0]
+
+
+def _slow(nv: Nvml, h: Any) -> dict[str, Any]:
     c = nv.call
-    uuid = text(c("nvmlDeviceGetUUID", h))
-    key = f"gpu/{uuid or index}"
-    util = c("nvmlDeviceGetUtilizationRates", h)
-    enc = c("nvmlDeviceGetEncoderUtilization", h)
-    dec = c("nvmlDeviceGetDecoderUtilization", h)
-    uma, total, used = gpu_memory(c("nvmlDeviceGetMemoryInfo", h), vm)
-    bar1 = c("nvmlDeviceGetBAR1MemoryInfo", h)
-    energy_mj = c("nvmlDeviceGetTotalEnergyConsumption", h)
-    energy_rate = rates.rate(f"{key}/energy", energy_mj)
-    clocks = {k: c("nvmlDeviceGetClockInfo", h, nv.const(v)) for k, v in CLOCKS.items()}
-    clk_max = _max_clock.get(uuid)
-    if clk_max is None:
-        clk_max = _max_clock[uuid] = c("nvmlDeviceGetMaxClockInfo", h, nv.const("NVML_CLOCK_GRAPHICS"))
-    pstate_no = c("nvmlDeviceGetPerformanceState", h)
-    pstate = f"P{pstate_no}" if pstate_no is not None else None
-    raw = c("nvmlDeviceGetCurrentClocksEventReasons", h)
-    if raw is None:
-        raw = c("nvmlDeviceGetCurrentClocksThrottleReasons", h)
-    util_pct = util.gpu if util is not None else None
-
-    throttle: dict[str, Any] = {"available": False}
-    if raw is not None and clocks["graphics"] is not None and clk_max is not None and pstate:
-        problem = bool(raw & PROBLEM_BITS)
-        status, locked = clock_status(float(clocks["graphics"]), float(clk_max), util_pct or 0, pstate, problem)
-        throttle = {"available": True, "status": status, "reasons": decode_reasons(raw),
-                    "raw": raw, "problem": problem, "locked": locked,
-                    "threshold_mhz": CLOCK_THRESHOLD_MHZ}
-
-    events = _events(nv, h)
-    event_pct = {}
-    for name, seconds in events.items():
-        r = rates.rate(f"{key}/event/{name}", seconds, 6)
-        event_pct[name] = None if r is None else round(100 * r, 2)
-
-    kib = 1024  # NVML's PCIe throughput is in KB/s, 1024-byte
-    tx = c("nvmlDeviceGetPcieThroughput", h, nv.const("NVML_PCIE_UTIL_TX_BYTES"))
-    rx = c("nvmlDeviceGetPcieThroughput", h, nv.const("NVML_PCIE_UTIL_RX_BYTES"))
-
+    clocks = {k: c("nvmlDeviceGetClockInfo", h, nv.const(v)) for k, v in CLOCKS.items() if k != "graphics"}
     ecc = None
     mode = c("nvmlDeviceGetEccMode", h)
     if mode and mode[0]:
@@ -460,8 +468,64 @@ def device_live(nv: Nvml, index: int, h: Any, rates: Rates, vm: Any,
             "aggregate_corrected": c("nvmlDeviceGetTotalEccErrors", h, corrected, aggregate),
             "aggregate_uncorrected": c("nvmlDeviceGetTotalEccErrors", h, uncorrected, aggregate),
         }
-    remapped = c("nvmlDeviceGetRemappedRows", h)
     fans = c("nvmlDeviceGetNumFans", h) or 0
+    return {
+        "enc": c("nvmlDeviceGetEncoderUtilization", h),
+        "dec": c("nvmlDeviceGetDecoderUtilization", h),
+        "energy_mj": c("nvmlDeviceGetTotalEnergyConsumption", h),
+        "clocks": clocks,
+        "events": _events(nv, h),
+        "tx": c("nvmlDeviceGetPcieThroughput", h, nv.const("NVML_PCIE_UTIL_TX_BYTES")),
+        "rx": c("nvmlDeviceGetPcieThroughput", h, nv.const("NVML_PCIE_UTIL_RX_BYTES")),
+        "replay": c("nvmlDeviceGetPcieReplayCounter", h),
+        "ecc": ecc,
+        "remapped": c("nvmlDeviceGetRemappedRows", h),
+        "fans": [c("nvmlDeviceGetFanSpeed_v2", h, k) for k in range(fans)],
+    }
+
+
+# A card's max graphics clock does not change, and each query is an ioctl
+# (~5 ms of CPU on a Turing card), so it is asked once per card.
+_max_clock: dict[str, Any] = {}
+
+
+def device_live(nv: Nvml, index: int, h: Any, rates: Rates, vm: Any,
+                clock_cap: dict[str, Any] | None, procs: GpuProcesses) -> dict[str, Any]:
+    c = nv.call
+    uuid = text(c("nvmlDeviceGetUUID", h))
+    key = f"gpu/{uuid or index}"
+    util = c("nvmlDeviceGetUtilizationRates", h)
+    uma, total, used = gpu_memory(c("nvmlDeviceGetMemoryInfo", h), vm)
+    bar1 = c("nvmlDeviceGetBAR1MemoryInfo", h)
+    graphics = c("nvmlDeviceGetClockInfo", h, nv.const("NVML_CLOCK_GRAPHICS"))
+    clk_max = _max_clock.get(uuid)
+    if clk_max is None:
+        clk_max = _max_clock[uuid] = c("nvmlDeviceGetMaxClockInfo", h, nv.const("NVML_CLOCK_GRAPHICS"))
+    pstate_no = c("nvmlDeviceGetPerformanceState", h)
+    pstate = f"P{pstate_no}" if pstate_no is not None else None
+    raw = reasons(nv, index, h)
+    util_pct = util.gpu if util is not None else None
+
+    slow, slow_age = nv.memo(f"{index}/slow", SLOW_TTL_S, lambda: _slow(nv, h))
+    fresh = slow_age == 0.0
+
+    throttle: dict[str, Any] = {"available": False}
+    if raw is not None and graphics is not None and clk_max is not None and pstate:
+        problem = bool(raw & PROBLEM_BITS)
+        status, locked = clock_status(float(graphics), float(clk_max), util_pct or 0, pstate, problem)
+        throttle = {"available": True, "status": status, "reasons": decode_reasons(raw),
+                    "raw": raw, "problem": problem, "locked": locked,
+                    "threshold_mhz": CLOCK_THRESHOLD_MHZ}
+
+    events = slow["events"]
+    event_pct = {}
+    for name, seconds in events.items():
+        r = nv.window_rate(f"{key}/event/{name}", seconds, fresh)
+        event_pct[name] = None if r is None else round(100 * r, 2)
+    energy_mj = slow["energy_mj"]
+    energy_rate = nv.window_rate(f"{key}/energy", energy_mj, fresh)
+    kib = 1024  # NVML's PCIe throughput is in KB/s, 1024-byte
+    tx, rx, remapped, enc, dec = slow["tx"], slow["rx"], slow["remapped"], slow["enc"], slow["dec"]
 
     return {
         "index": index,
@@ -481,15 +545,15 @@ def device_live(nv: Nvml, index: int, h: Any, rates: Rates, vm: Any,
             "bar1_used_bytes": bar1.bar1Used if bar1 is not None else None,
         },
         "temperature_celsius": c("nvmlDeviceGetTemperature", h, nv.const("NVML_TEMPERATURE_GPU")),
-        "fan_speeds_percent": [c("nvmlDeviceGetFanSpeed_v2", h, k) for k in range(fans)],
+        "fan_speeds_percent": slow["fans"],
         "power": {
             "draw_watts": watts(c("nvmlDeviceGetPowerUsage", h)),
             "limit_watts": watts(c("nvmlDeviceGetEnforcedPowerLimit", h)),
             "energy_joules": round(energy_mj / 1000, 3) if isinstance(energy_mj, int) else None,
-            # mJ per second is mW: the mean draw over the interval
+            # mJ per second is mW: the mean draw over the energy counter's window
             "average_watts": None if energy_rate is None else round(energy_rate / 1000, 3),
         },
-        "clocks_mhz": clocks,
+        "clocks_mhz": {"graphics": graphics, **slow["clocks"]},
         "max_graphics_clock_mhz": clk_max,
         "pstate": pstate,
         "throttle": throttle,
@@ -501,12 +565,15 @@ def device_live(nv: Nvml, index: int, h: Any, rates: Rates, vm: Any,
             "link_width": c("nvmlDeviceGetCurrPcieLinkWidth", h),
             "tx_bytes_per_s": tx * kib if isinstance(tx, int) else None,
             "rx_bytes_per_s": rx * kib if isinstance(rx, int) else None,
-            "replay_count": c("nvmlDeviceGetPcieReplayCounter", h),
+            "replay_count": slow["replay"],
         },
-        "ecc_errors": ecc,
+        "ecc_errors": slow["ecc"],
         "remapped_rows": {"corrected": remapped[0], "uncorrected": remapped[1],
                           "pending": bool(remapped[2]), "failed": bool(remapped[3])}
         if remapped else None,
+        # How old the 5 s tier (PCIe throughput, encoder/decoder, the other
+        # clocks, energy, event counters, ECC, fans) is in this sample.
+        "slow_readings_age_s": round(slow_age, 2),
         "processes": procs.rows(nv, h),
     }
 
