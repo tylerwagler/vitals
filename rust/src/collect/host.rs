@@ -38,7 +38,18 @@ fn chassis_type(n: i64) -> String {
 
 // -- machine type -----------------------------------------------------------
 
+/// Proxmox (and any LXD/LXC) container: lxcfs serves its /proc files.
+fn lxcfs_mounted() -> bool {
+    read_text("/proc/mounts").unwrap_or_default().lines().any(|l| l.starts_with("lxcfs ") && l.contains(" /proc/"))
+}
+
 pub fn detect_container() -> Option<String> {
+    // LXC's own marks first: an OCI image run as a Proxmox app container
+    // carries the /run/systemd/container its build left ("docker"), which
+    // systemd-detect-virt then repeats.
+    if exists("/dev/.lxc-boot-id") || lxcfs_mounted() {
+        return Some("lxc".into());
+    }
     let answer = run_any(&["systemd-detect-virt", "--container"]).unwrap_or_default();
     let answer = answer.trim();
     if !answer.is_empty() && answer != "none" {
@@ -54,11 +65,6 @@ pub fn detect_container() -> Option<String> {
     }
     if exists("/.dockerenv") {
         return Some("docker".into());
-    }
-    // Proxmox (and any LXD/LXC) container: lxcfs serves its /proc files.
-    let mounts = read_text("/proc/mounts").unwrap_or_default();
-    if mounts.lines().any(|l| l.starts_with("lxcfs ") && l.contains(" /proc/")) {
-        return Some("lxc".into());
     }
     None
 }

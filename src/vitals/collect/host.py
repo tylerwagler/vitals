@@ -42,6 +42,11 @@ VM_VENDORS = {
 
 
 def detect_container() -> str | None:
+    # LXC's own marks first: an OCI image run as a Proxmox app container
+    # carries the /run/systemd/container its build left ("docker"), which
+    # systemd-detect-virt then repeats.
+    if os.path.exists("/dev/.lxc-boot-id") or _lxcfs_mounted():
+        return "lxc"
     answer = (run_any(["systemd-detect-virt", "--container"]) or "").strip()
     if answer and answer != "none":
         return answer
@@ -54,11 +59,13 @@ def detect_container() -> str | None:
         return "podman"
     if os.path.exists("/.dockerenv"):
         return "docker"
-    # Proxmox (and any LXD/LXC) container: lxcfs serves its /proc files.
-    mounts = read_text("/proc/mounts") or ""
-    if any(line.startswith("lxcfs ") and " /proc/" in line for line in mounts.splitlines()):
-        return "lxc"
     return None
+
+
+def _lxcfs_mounted() -> bool:
+    """Proxmox (and any LXD/LXC) container: lxcfs serves its /proc files."""
+    mounts = read_text("/proc/mounts") or ""
+    return any(line.startswith("lxcfs ") and " /proc/" in line for line in mounts.splitlines())
 
 
 def detect_hypervisor() -> str | None:
