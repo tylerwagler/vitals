@@ -15,7 +15,7 @@ curl -sN 'localhost:9420/v1/stream?interval=1&sections=cpu,memory'
 ```
 
 `vitals` is one Rust binary per architecture (`rust/`), about 2 MB, needing
-glibc 2.41 or later and nothing else. GPUs need the NVIDIA driver, whose
+glibc 2.39 or later and nothing else. GPUs need the NVIDIA driver, whose
 `libnvidia-ml.so.1` it loads at runtime; without it, everything else is
 still reported, with no GPUs. pulsar-gui's cluster view polls
 `/metrics.json`, which keeps its old shape.
@@ -147,14 +147,14 @@ pays both, whatever language it is in. `docs/rust-port.md` has the reasoning.
 ## Build
 
 ```sh
-make rust       # -> dist/vitals-x86_64, dist/vitals-aarch64 (glibc >= 2.41)
+make rust       # -> dist/vitals-x86_64, dist/vitals-aarch64 (glibc >= 2.39)
 make pyz        # -> dist/vitals.pyz, the Python reference (python3 >= 3.11)
 ```
 
 The Rust builds cross-compile from any x86_64 host with `cargo-zigbuild`
 (`cargo install cargo-zigbuild`) and a zig (`uv tool install ziglang`, found
-as `python-zig`), pinned to glibc 2.41 so one binary runs on Debian 13,
-Ubuntu 24.04+ and DGX OS. In `rust/`, a plain `cargo build --release` builds
+as `python-zig`), pinned to glibc 2.39 so one binary runs on Ubuntu 24.04+,
+Debian 13 and DGX OS. In `rust/`, a plain `cargo build --release` builds
 for the machine it runs on.
 
 ## Install as a service

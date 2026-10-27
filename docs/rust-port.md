@@ -2,8 +2,34 @@
 
 Status: **done 2026-10-27** (branch `rust-port`). `rust/` is at parity with the Python reference
 on the VM, Sparky and CT 124: `scripts/compare.py` finds no differences, and the API suite passes
-against the binary on all three. Not deployed yet. The scope as written on 2026-10-26 follows the
-results.
+against the binary on all three. **Deployed 2026-10-27** (see *Deployment*). The scope as written
+on 2026-10-26 follows the results.
+
+## Deployment (2026-10-27)
+
+The exporter the hosts ran was not this repo's original but pulsar-gui's own copy
+(`exporter/sparkview_exporter.py`, 051526e) on Sparky and pve1 CT 130, and the older original on
+CT 124 and CT 131. pulsar-gui's copy had grown the GPU processes' `gpu`, `ppid` and served `port`
+(how pulsar-gui attributes a card to a service), a Prometheus `/metrics` in the 0.6.0 series (the
+Switchyard dashboard), the 0.6.0 unit flags, and clock caps given as unit variables. All of that
+was carried into both implementations first (`2bf0f6f`), then checked against the running
+exporter on each host with `scripts/compare.py http://localhost:9420 ./vitals`. Sparky: no
+differences, 271 of 271 series. CT 130: none, 73 of 73. CT 124 and CT 131: none in
+`/metrics.json`, and the old copy there has no `/metrics`.
+
+| Host | How it runs | Binary |
+|---|---|---|
+| Sparky | `vitals.service`, `/opt/vitals/vitals`, user `vitals` | aarch64 `9a4909da` |
+| pve2 CT 124 `turing` | `vitals.service` + `vitals.service.d/nvml.conf` (`LD_LIBRARY_PATH=/usr/local/nvidia/lib64`) | x86_64 `b813facf` |
+| pve2 CT 131 `retriever` | the same | x86_64 `b813facf` |
+| pve1 CT 130 `gemma` | the container's running entrypoint (`/opt/sparkview-exporter/entrypoint.sh`) starts `sparkview_exporter.py`, now a shim that execs `/opt/vitals/vitals`, as nobody | x86_64 `b813facf` |
+
+On each host the old `sparkview-exporter.service` is disabled and stopped, and its files are kept
+for rollback (`systemctl disable --now vitals && systemctl enable --now sparkview-exporter`). On
+CT 130 the original is `sparkview_exporter.py.bak-2026-10-27`: copy it back over the shim and stop
+the running `vitals` to roll back. CT 130's entrypoint still names the old path. `pct set 130
+--entrypoint /opt/vitals/entrypoint.sh` takes effect at its next start, and then the shim and
+`/opt/sparkview-exporter` can go. pulsar-gui (CT 104) reads all four hosts as `ok` on 0.3.0.
 
 ## Results
 
@@ -20,7 +46,7 @@ Serving a 1 Hz stream, whole process:
   alone is 4 MB; loading NVML adds ~20 MB of `libnvidia-ml`/`libcuda` allocations, which every
   NVML client carries.
 - **Size:** 1.9 MB (x86_64) and 1.6 MB (aarch64), built from the VM with `cargo zigbuild` against
-  glibc 2.41.
+  glibc 2.39.
 
 What the port changed or found on the way:
 

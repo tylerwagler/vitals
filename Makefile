@@ -1,8 +1,8 @@
 # vitals is a Rust binary (rust/); the Python package (src/vitals) is the
 # reference implementation it is held to, and the rollback.
 #
-#   make rust   -> dist/vitals-x86_64, dist/vitals-aarch64 (glibc >= 2.41:
-#                  Debian 13, Ubuntu 24.04+, DGX OS)
+#   make rust   -> dist/vitals-x86_64, dist/vitals-aarch64 (glibc >= 2.39:
+#                  Ubuntu 24.04+, Debian 13, DGX OS)
 #   make pyz    -> dist/vitals.pyz, the Python build (python3 >= 3.11)
 #   make test   -> Rust unit tests, then the API suite against both builds
 #
@@ -10,7 +10,7 @@
 # zig on PATH or in ZIG (uv tool install ziglang provides python-zig).
 
 PYTHON ?= python3
-GLIBC ?= 2.41
+GLIBC ?= 2.39
 ZIG ?= $(shell command -v zig || command -v python-zig)
 RUST_SRC := $(shell find rust/src -name '*.rs') rust/Cargo.toml rust/Cargo.lock
 

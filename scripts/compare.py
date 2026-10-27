@@ -150,6 +150,9 @@ def main() -> int:
             for line in out:
                 print("  " + line)
             found += len(out)
+        if not (has(a[1], "/metrics") and has(b[1], "/metrics")):
+            print("== /metrics: skipped (one side has no Prometheus endpoint)")
+            return 1 if found else 0
         sa, sb = series(fetch_raw(a[1], "/metrics").decode()), series(fetch_raw(b[1], "/metrics").decode())
         # GPU processes come and go between two reads; their series are not compared.
         moving = re.compile(r"^sparkview_process_")
