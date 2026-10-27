@@ -81,11 +81,13 @@ class Server(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, address: tuple[str, int], hub: Hub, legacy: Exporter, max_streams: int = MAX_STREAMS) -> None:
+    def __init__(self, address: tuple[str, int], hub: Hub, legacy: Exporter, max_streams: int = MAX_STREAMS,
+                 keepalive_s: float = KEEPALIVE_S) -> None:
         super().__init__(address, Handler)
         self.hub = hub
         self.legacy = legacy
         self.max_streams = max_streams
+        self.keepalive_s = keepalive_s
         self.streams = 0
         self.streams_lock = threading.Lock()
 
@@ -267,7 +269,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(b"retry: 3000\n\n")
             hello: dict[str, Any] = {
                 "service": "vitals", "version": __version__, "hostname": static_doc["hostname"],
-                "interval_s": interval, "keepalive_s": KEEPALIVE_S,
+                "interval_s": interval, "keepalive_s": srv.keepalive_s,
                 "sections": list(sections or LIVE_SECTIONS),
                 "static_generation": static_doc["generation"],
             }
@@ -285,11 +287,11 @@ class Handler(BaseHTTPRequestHandler):
                 srv.streams -= 1
 
     def _pump(self, sid: int, interval: float, sections: tuple[str, ...] | None, generation: str) -> None:
-        hub = self.server.hub
+        hub, keepalive_s = self.server.hub, self.server.keepalive_s
         last_seq, next_due, last_write = 0, 0.0, time.monotonic()
         while True:
             with hub.cond:
-                deadline = last_write + KEEPALIVE_S
+                deadline = last_write + keepalive_s
                 while not hub.stopping:
                     fresh = hub.seq != last_seq and time.monotonic() >= next_due
                     if fresh or hub.static_generation != generation:
@@ -314,7 +316,7 @@ class Handler(BaseHTTPRequestHandler):
                 # jitter, so a 5 s subscriber on a 1 s sampler gets every 5th.
                 next_due = now + interval * 0.9
                 sent = True
-            if not sent and now - last_write >= KEEPALIVE_S:
+            if not sent and now - last_write >= keepalive_s:
                 self._event(None)
                 sent = True
             if sent:

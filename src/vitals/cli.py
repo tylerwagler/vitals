@@ -30,6 +30,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--host", default="0.0.0.0", help="listen address (default 0.0.0.0)")
     parser.add_argument("--port", type=int, default=9420, help="listen port (default 9420)")
     parser.add_argument("--max-streams", type=int, default=8, help="concurrent /v1/stream subscribers (default 8)")
+    parser.add_argument("--keepalive", type=float, default=15.0, help=argparse.SUPPRESS)  # tests shorten it
     parser.add_argument("--once", nargs="?", const="all", metavar="WHAT",
                         choices=("all", "static", "live", "processes", "metrics"),
                         help="print one reading and exit: all (default), static, live, processes, metrics")
@@ -49,7 +50,7 @@ def main(argv: list[str] | None = None) -> None:
         print(json.dumps(once(hub, legacy, args.once), indent=2, default=str))
         return
 
-    server = Server((args.host, args.port), hub, legacy, max_streams=args.max_streams)
+    server = Server((args.host, args.port), hub, legacy, max_streams=args.max_streams, keepalive_s=args.keepalive)
     hub.listen = f"{args.host}:{server.server_address[1]}"
     logger.info("vitals %s on http://%s/ (stream: /v1/stream)", __version__, hub.listen)
     try:

@@ -1,12 +1,24 @@
-"""The HTTP API and the stream, against a real server on this machine."""
+"""The HTTP API and the stream, black-box, against a real server.
+
+By default the server is this checkout's Python one, in-process. With
+``VITALS_BIN`` set (``VITALS_BIN=rust/target/release/vitals``, or
+``VITALS_BIN="python3 dist/vitals.pyz"``) the same tests run against that
+build, started on a free port: this suite is the contract every
+implementation answers to.
+"""
 
 from __future__ import annotations
 
 import gzip
 import http.client
 import json
+import os
+import shlex
+import socket
+import subprocess
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -14,22 +26,61 @@ from vitals import server as servermod
 from vitals.hub import LIVE_SECTIONS, STATIC_SECTIONS, Hub
 from vitals.legacy import Exporter
 
+FIXTURES = Path(__file__).parent / "fixtures"
+TEST_FLAGS = ["--max-streams", "2", "--keepalive", "0.4"]
+
+
+class Target:
+    def __init__(self, port: int) -> None:
+        self.host, self.port = "127.0.0.1", port
+
+    def health(self) -> dict:
+        return get_json(self, "/health")[1]
+
+
+def free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
 
 @pytest.fixture
-def srv(monkeypatch):
-    monkeypatch.setattr(servermod, "KEEPALIVE_S", 0.4)
+def srv():
+    command = os.environ.get("VITALS_BIN")
+    if command:
+        port = free_port()
+        proc = subprocess.Popen([*shlex.split(command), "--host", "127.0.0.1", "--port", str(port), *TEST_FLAGS],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        target = Target(port)
+        deadline = time.monotonic() + 15
+        while True:
+            try:
+                target.health()
+                break
+            except OSError:
+                if proc.poll() is not None or time.monotonic() > deadline:
+                    proc.kill()
+                    raise RuntimeError(f"{command} did not start: {proc.stderr.read().decode()[-2000:]}")
+                time.sleep(0.05)
+        yield target
+        proc.terminate()
+        try:
+            proc.wait(5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        return
     hub = Hub()
-    s = servermod.Server(("127.0.0.1", 0), hub, Exporter(hub.nv, hub.clock_cap), max_streams=2)
+    s = servermod.Server(("127.0.0.1", 0), hub, Exporter(hub.nv, hub.clock_cap), max_streams=2, keepalive_s=0.4)
     t = threading.Thread(target=s.serve_forever, daemon=True)
     t.start()
-    yield s
+    yield Target(s.server_address[1])
     hub.stop()
     s.shutdown()
     s.server_close()
 
 
 def get(srv, path, headers=None):
-    conn = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=20)
+    conn = http.client.HTTPConnection(srv.host, srv.port, timeout=20)
     conn.request("GET", path, headers=headers or {})
     resp = conn.getresponse()
     body = resp.read()
@@ -48,7 +99,7 @@ class Stream:
     """A minimal SSE reader: (event, data) pairs, keepalives as (None, None)."""
 
     def __init__(self, srv, path):
-        self.conn = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=10)
+        self.conn = http.client.HTTPConnection(srv.host, srv.port, timeout=10)
         self.conn.request("GET", path, headers={"Accept": "text/event-stream"})
         self.resp = self.conn.getresponse()
 
@@ -192,9 +243,40 @@ def test_keepalive_when_nothing_is_due(srv):
 def test_sampler_stops_when_the_last_subscriber_leaves(srv):
     s = Stream(srv, "/v1/stream?interval=0.25")
     s.until("sample")
+    assert srv.health()["streams"] == 1 and srv.health()["sampling"]
     s.close()
+    # The server notices the closed socket at its next write.
     deadline = time.monotonic() + 5
-    while time.monotonic() < deadline and (srv.hub.subscribers or srv.hub._sampler is not None):
+    while time.monotonic() < deadline and (srv.health()["streams"] or srv.health()["sampling"]):
         time.sleep(0.1)
-    # The handler notices the closed socket at its next write.
-    assert not srv.hub.subscribers and srv.hub._sampler is None and srv.streams == 0
+    health = srv.health()
+    assert health["streams"] == 0 and not health["sampling"]
+
+
+def keys(d, *path):
+    for p in path:
+        d = d[p]
+    return set(d)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [(), ("info",), ("gpus", 0), ("gpus", 0, "throttle"), ("gpus", 0, "identity"),
+     ("gpus", 0, "clock_event_seconds"), ("memory",), ("pressure",), ("cpu",),
+     ("spbm",), ("thermal_zones", 0), ("hwmon_temperatures", 0), ("network", 0),
+     ("rdma", 0), ("rdma", 0, "errors"), ("rdma", 0, "hw_counters")],
+)
+def test_metrics_json_has_the_reference_fields_this_host_has(srv, path):
+    _, ours = get_json(srv, "/metrics.json")
+    ref = json.loads((FIXTURES / "reference-0.6.0.json").read_text())
+    try:
+        mine = keys(ours, *path)
+    except (KeyError, IndexError, TypeError):
+        pytest.skip(f"this host has no {'/'.join(map(str, path))}")
+    if path == ("gpus", 0, "throttle") and mine == {"available"}:
+        pytest.skip("this GPU reports no clock state")
+    if path == ("gpus", 0, "clock_event_seconds") and not mine:
+        pytest.skip("this GPU has no clocks-event counters")
+    if path == ("rdma", 0, "hw_counters") and not mine:
+        pytest.skip("this port has no hw counters")
+    assert keys(ref, *path) <= mine
