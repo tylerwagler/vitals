@@ -118,11 +118,16 @@ and that is not a change of hardware.
 Process tables give names and owners, never command lines, which can carry
 secrets (an `--api-key`). On the LAN, everything here is readable by anyone.
 
-**Cost.** A sample takes about 20 ms without a GPU. Each NVIDIA card adds
-about 100 ms of wall time: the PCIe throughput counters sample for 20 ms
-each, and on an idle Turing card the clocks-event query alone takes about
-25 ms of CPU. Cards are sampled in parallel. A 1 Hz stream on CT 124 (one
-RTX 5000) costs about 13% of one core; nothing runs while nobody listens.
+**Cost.** Readings are tiered by what they cost. Every sample takes the cheap
+ones: utilization, memory, temperatures, power, the graphics clock. A GPU's
+clocks-event reasons (about 25 ms of driver CPU on an idle Turing card) are
+asked at most once a second. PCIe throughput (20 ms per call by design),
+encoder/decoder, the other clocks, energy, event counters, ECC and fans are
+asked every 5 s (`slow_readings_age_s` says how old). hwmon labels are cached
+for a minute, and cooling devices for 10 s. At 1 Hz, the whole process costs
+about 57 ms of CPU per sample on CT 124 (one RTX 5000, 5.7% of a core) and
+10 ms on Sparky (1%). Nothing runs while nobody listens. `docs/rust-port.md`
+scopes a native rewrite.
 
 ## Build
 
