@@ -19,10 +19,10 @@ differences, 271 of 271 series. CT 130: none, 73 of 73. CT 124 and CT 131: none 
 
 | Host | How it runs | Binary |
 |---|---|---|
-| Sparky | `vitals.service`, `/opt/vitals/vitals`, user `vitals` | aarch64 `9a4909da` |
-| pve2 CT 124 `turing` | `vitals.service` + `vitals.service.d/nvml.conf` (`LD_LIBRARY_PATH=/usr/local/nvidia/lib64`) | x86_64 `b813facf` |
-| pve2 CT 131 `retriever` | the same | x86_64 `b813facf` |
-| pve1 CT 130 `gemma` | the container's running entrypoint (`/opt/sparkview-exporter/entrypoint.sh`) starts `sparkview_exporter.py`, now a shim that execs `/opt/vitals/vitals`, as nobody | x86_64 `b813facf` |
+| Sparky | `vitals.service`, `/opt/vitals/vitals`, user `vitals` | aarch64 `23170ecb` |
+| pve2 CT 124 `turing` | `vitals.service` + `vitals.service.d/nvml.conf` (`LD_LIBRARY_PATH=/usr/local/nvidia/lib64`) | x86_64 `1f2deeef` |
+| pve2 CT 131 `retriever` | the same | x86_64 `1f2deeef` |
+| pve1 CT 130 `gemma` | the container's running entrypoint (`/opt/sparkview-exporter/entrypoint.sh`) starts `sparkview_exporter.py`, now a shim that execs `/opt/vitals/vitals`, as nobody | x86_64 `1f2deeef` |
 
 On each host the old `sparkview-exporter.service` is disabled and stopped, and its files are kept
 for rollback (`systemctl disable --now vitals && systemctl enable --now sparkview-exporter`). On
@@ -30,6 +30,8 @@ CT 130 the original is `sparkview_exporter.py.bak-2026-10-27`: copy it back over
 the running `vitals` to roll back. CT 130's entrypoint still names the old path. `pct set 130
 --entrypoint /opt/vitals/entrypoint.sh` takes effect at its next start, and then the shim and
 `/opt/sparkview-exporter` can go. pulsar-gui (CT 104) reads all four hosts as `ok` on 0.3.0.
+The binaries in the table are `da915e1` (LXC detected before an image's own claim, which made
+CT 130 read as Docker), redeployed to all four hosts the same day.
 
 ## Results
 
