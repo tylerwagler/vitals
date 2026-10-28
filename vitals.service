@@ -1,11 +1,11 @@
 [Unit]
-Description=vitals: GPU and host state as JSON for pulsar-gui (:9420)
+Description=vitals: host hardware, OS and live state as JSON and SSE (:9420)
 After=network-online.target nvidia-persistenced.service
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /opt/vitals/vitals.py --port 9420
+ExecStart=/opt/vitals/vitals --port 9420
 Restart=on-failure
 RestartSec=2
 

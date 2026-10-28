@@ -5,8 +5,8 @@
 # answers on the container's own address and reports the container's
 # hostname, memory and processes, as nobody.
 #
-# Inside the container: /opt/vitals/{vitals.py,
-# pynvml.py} and psutil. Then on the host:
+# Inside the container: /opt/vitals/vitals (the binary for its architecture).
+# Then on the host:
 #   systemctl enable --now vitals-pct@130
 
 [Unit]
@@ -18,9 +18,9 @@ Wants=pve-guests.service
 Type=simple
 # A process left behind in the container would hold the port: pct exec does
 # not carry our stop into the container, so clear it both before and after.
-ExecStartPre=-/usr/sbin/pct exec %i -- pkill -f /opt/vitals/vitals.py
-ExecStart=/usr/sbin/pct exec %i -- setpriv --reuid=nobody --regid=nogroup --clear-groups --no-new-privs /usr/bin/python3 /opt/vitals/vitals.py --port 9420
-ExecStopPost=-/usr/sbin/pct exec %i -- pkill -f /opt/vitals/vitals.py
+ExecStartPre=-/usr/sbin/pct exec %i -- pkill -x vitals
+ExecStart=/usr/sbin/pct exec %i -- setpriv --reuid=nobody --regid=nogroup --clear-groups --no-new-privs /opt/vitals/vitals --port 9420
+ExecStopPost=-/usr/sbin/pct exec %i -- pkill -x vitals
 # The container may be stopped or restarting; keep trying.
 Restart=always
 RestartSec=15
